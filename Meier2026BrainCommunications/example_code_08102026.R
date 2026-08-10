@@ -27,10 +27,12 @@
 # 3.5. Sensitivity Analysis: Exclude CT/MRI+
 
 # LOAD PACKAGES
+library(plyr)
 library(tidyverse)   # Data manipulation (dplyr, tidyr, purrr)
 library(gtsummary)   # Demographic summary tables
 theme_gtsummary_compact() # Compact styling theme for tables
 library(DT)          # Interactive datatables
+library(broom)
 
 #####################################################################################################################
 ######################################## 1. SPORTS-RELATED CONCUSSION COHORT ########################################
