@@ -1,0 +1,192 @@
+---
+title: "Create weighted bilateral average of PTX tracts; then combat"
+author: "TM, MA"
+date: "06/16/2025; 07/15/2025; 10/01/25; 12/10/25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#don't have tidyverse loaded
+library(longCombat)
+unloadNamespace("tidyverse")
+```
+
+## Load and organize the data
+```{r}
+#load RDS file generated from the IPTW scripts. 
+data <- readRDS("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/MRI/121025/data_MRI_PIRPT.rds")
+
+#Data already restricted to visits of interest and those without CMV removed. 
+
+# Convert variables to appropriate types
+data$Race_recode <- factor(data$Race_recode)
+data$Ethnicity_recode <- factor(data$Ethnicity_recode)
+data$MILACADEMY <- factor(data$MILACADEMY)
+data$SEX <- factor(data$SEX)
+data$mTBIvsCtrl <- factor(data$mTBIvsCtrl)
+data$SPORTSRC <- factor(data$SPORTSRC)
+data$COMBATSRC <- factor(data$COMBATSRC)
+data$MILCADET <- factor(data$MILCADET)
+data$mTBI_CMV_Comb <- factor(data$mTBI_CMV_Comb)
+data$mTBI_CMV_PI <- factor(data$mTBI_CMV_PI)
+data$SRC_CMV_comb <- factor(data$SRC_CMV_comb)
+data$SRC_CMV_PI <- factor(data$SRC_CMV_PI)
+data$CMV_STATUS_COMBINE <- factor(data$CMV_STATUS_COMBINE)
+data$INJURYID <- as.factor(data$INJURYID)
+data$ScanSite <- as.factor(data$ScanSite)
+data$ScanCoilSite <- factor(data$ScanCoilSite)
+data$RSFC_QA <- factor(data$RSFC_QA)
+data$RSFC_QA_final <- factor(data$RSFC_QA_final)
+data$FD_mean_group <- factor(data$FD_mean_group)
+data$FS_QA <- factor(data$FS_QA)
+data$AUTOPTX_exclude <- factor(data$AUTOPTX_exclude)
+
+# Recode CMV_STATUS to binary treatment variable using  CMV_PI
+# CMV+ = 1 (treated), CMV- = 0 (control)
+data$CMV_BINARY <- data$CMV_PI
+data$CMV_BINARY <- factor(data$CMV_BINARY, levels=c("0", "1"), labels=c("CMV-", "CMV+"))
+
+# calculate weighted averages to get bilateral tract information. 
+data$ar_b_md <- (data$ar_l_md * data$ar_l_size + data$ar_r_md * data$ar_r_size) /
+                (data$ar_l_size + data$ar_r_size)
+data$atr_b_md <- (data$atr_l_md * data$atr_l_size + data$atr_r_md * data$atr_r_size) /
+                (data$atr_l_size + data$atr_r_size)
+data$cgc_b_md <- (data$cgc_l_md * data$cgc_l_size + data$cgc_r_md * data$cgc_r_size) /
+                (data$cgc_l_size + data$cgc_r_size)
+data$cgh_b_md <- (data$cgh_l_md * data$cgh_l_size + data$cgh_r_md * data$cgh_r_size) /
+                (data$cgh_l_size + data$cgh_r_size)
+data$cst_b_md <- (data$cst_l_md * data$cst_l_size + data$cst_r_md * data$cst_r_size) /
+                (data$cst_l_size + data$cst_r_size)
+data$ifo_b_md <- (data$ifo_l_md * data$ifo_l_size + data$ifo_r_md * data$ifo_r_size) /
+                (data$ifo_l_size + data$ifo_r_size)
+data$ilf_b_md <- (data$ilf_l_md * data$ilf_l_size + data$ilf_r_md * data$ilf_r_size) /
+                (data$ilf_l_size + data$ilf_r_size)
+data$ml_b_md <- (data$ml_l_md * data$ml_l_size + data$ml_r_md * data$ml_r_size) /
+                (data$ml_l_size + data$ml_r_size)
+data$ptr_b_md <- (data$ptr_l_md * data$ptr_l_size + data$ptr_r_md * data$ptr_r_size) /
+                (data$ptr_l_size + data$ptr_r_size)
+data$slf_b_md <- (data$slf_l_md * data$slf_l_size + data$slf_r_md * data$slf_r_size) /
+                (data$slf_l_size + data$slf_r_size)
+data$str_b_md <- (data$str_l_md * data$str_l_size + data$str_r_md * data$str_r_size) /
+                (data$str_l_size + data$str_r_size)
+data$unc_b_md <- (data$unc_l_md * data$unc_l_size + data$unc_r_md * data$unc_r_size) /
+                (data$unc_l_size + data$unc_r_size)
+
+roi <- c("ar_b_md", "atr_b_md", "cgc_b_md", "cgh_b_md", "cst_b_md", "ifo_b_md", "ilf_b_md", "ml_b_md", "ptr_b_md", "slf_b_md", "str_b_md", "unc_b_md", "fma_md",	"fmi_md",	"mcp_md"	)
+
+###Subset the analysis to include only subjects with GOOD data
+dti_data<- subset(data, AUTOPTX_exclude == "Usable")
+
+dti_data1 <- dti_data[c("INJURYID", 
+                   "mTBI_CMV_PI", 
+                   "VISIT",
+                   "iptw", 
+                   "ScanSite",
+                   roi)]
+
+
+```
+
+## Run ComBat
+```{r}
+# basic model
+combat <- longCombat(idvar='INJURYID', 
+             timevar = "VISIT",
+             batchvar='ScanSite', 
+             features= roi,
+             formula="mTBI_CMV_PI*VISIT",
+             ranef='(1|INJURYID)',
+             data=dti_data1)
+
+dti_data_combat <- combat$data_combat
+
+#merge with original data
+dti_data_merge <- merge(dti_data, dti_data_combat, by=c('INJURYID', 'VISIT'))
+
+#Save R file (should keep all structure and labels)
+saveRDS(dti_data_merge, "/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/MRI/121025/Rdata/data_MRI_PIRPT_MDbicombat.rds")
+
+```
+
+## Correlate output
+
+```{r}
+# CREATE VECTOR FOR COMBAT VARIABLES
+roi_combat <- names(dti_data_merge)[grepl("\\.combat$", names(dti_data_merge))]
+
+# COMPUTE PAIRED CORRELATIONS ACROSS VISITS
+corr_df <- data.frame(
+  variable = roi,
+  sapply(c("24H", "Asymp", "PRTP", "6Mo"), function(v) {
+    sapply(seq_along(roi), function(i) {
+      x <- dti_data_merge[[roi[i]]][dti_data_merge$VISIT == v]
+      y <- dti_data_merge[[roi_combat[i]]][dti_data_merge$VISIT == v]
+      valid <- !is.na(x) & !is.na(y)
+      corr <- cor(x[valid], y[valid], use = "complete.obs")
+      n <- sum(valid)
+      paste0(round(corr, 3), " (n = ", n, ")")})}),
+  stringsAsFactors = FALSE)
+
+corr_df
+
+```
+
+# Plots
+```{r}
+# batch boxplots
+batchBoxplot(idvar='INJURYID', 
+             batchvar='ScanSite.x', 
+             feature='fma_md',
+             formula='mTBI_CMV_PI*VISIT',
+             ranef='(1|INJURYID)',
+             adjustBatch = FALSE,
+             data=dti_data_merge)
+batchBoxplot(idvar='INJURYID', 
+             batchvar='ScanSite.x', 
+             feature='fma_md.combat',
+             formula='mTBI_CMV_PI*VISIT',
+             ranef='(1|INJURYID)',
+             adjustBatch = FALSE,
+             data=dti_data_merge)
+
+# mean boxplots
+boxplot(dti_data_merge$fma_md ~ dti_data_merge$ScanSite.x, 
+        main = "PRE: fma by ScanSite",
+        xlab = "ScanSite.x", 
+        ylab = "fma")
+
+boxplot(dti_data_merge$fma_md.combat ~ dti_data_merge$ScanSite.x, 
+        main = "POST: fma by ScanSite",
+        xlab = "ScanSite.x", 
+        ylab = "fma")
+
+#check all PRE combated ROIs
+addTest(idvar='INJURYID',
+        batchvar='ScanSite.x',
+        features=roi,
+        formula='mTBI_CMV_PI*VISIT',
+        ranef='(1|INJURYID)',
+        data=dti_data_merge)
+multTest(idvar='INJURYID',
+         batchvar='ScanSite.x',
+         features=roi,
+         formula='mTBI_CMV_PI*VISIT',
+         ranef='(1|INJURYID)',
+         data=dti_data_merge)
+
+#check all combated ROIs
+addTest(idvar='INJURYID',
+        batchvar='ScanSite.x',
+        features=roi_combat,
+        formula='mTBI_CMV_PI*VISIT',
+        ranef='(1|INJURYID)',
+        data=dti_data_merge)
+multTest(idvar='INJURYID',
+         batchvar='ScanSite.x',
+         features=roi_combat,
+         formula='mTBI_CMV_PI*VISIT',
+         ranef='(1|INJURYID)',
+         data=dti_data_merge)
+
+```

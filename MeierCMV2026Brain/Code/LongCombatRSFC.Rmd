@@ -1,0 +1,273 @@
+---
+title: "Combat RSFC"
+author: "TM, MA"
+date: "061625; 071525; 100125; 12122025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#don't have tidyverse loaded
+library(longCombat)
+unloadNamespace("tidyverse")
+```
+
+## Load and organize the data
+```{r}
+#load RDS file generated from the IPTW scripts. 
+data <- readRDS("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/MRI/121025/data_MRI_PIRPT.rds")
+
+
+#Data already restricted to visits of interest and those without CMV removed. 
+
+# Convert variables to appropriate types
+data$Race_recode <- factor(data$Race_recode)
+data$Ethnicity_recode <- factor(data$Ethnicity_recode)
+data$MILACADEMY <- factor(data$MILACADEMY)
+data$SEX <- factor(data$SEX)
+data$mTBIvsCtrl <- factor(data$mTBIvsCtrl)
+data$SPORTSRC <- factor(data$SPORTSRC)
+data$COMBATSRC <- factor(data$COMBATSRC)
+data$MILCADET <- factor(data$MILCADET)
+data$mTBI_CMV_Comb <- factor(data$mTBI_CMV_Comb)
+data$mTBI_CMV_PI <- factor(data$mTBI_CMV_PI)
+data$SRC_CMV_comb <- factor(data$SRC_CMV_comb)
+data$SRC_CMV_PI <- factor(data$SRC_CMV_PI)
+data$CMV_STATUS_COMBINE <- factor(data$CMV_STATUS_COMBINE)
+data$INJURYID <- as.factor(data$INJURYID)
+data$ScanSite <- as.factor(data$ScanSite)
+data$ScanCoilSite <- factor(data$ScanCoilSite)
+data$RSFC_QA <- factor(data$RSFC_QA)
+data$RSFC_QA_final <- factor(data$RSFC_QA_final)
+data$FD_mean_group <- factor(data$FD_mean_group)
+data$FS_QA <- factor(data$FS_QA)
+data$AUTOPTX_exclude <- factor(data$AUTOPTX_exclude)
+
+# Recode CMV_STATUS to binary treatment variable using CMV_PI
+# CMV+ = 1 (treated), CMV- = 0 (control)
+data$CMV_BINARY <- data$CMV_PI
+data$CMV_BINARY <- factor(data$CMV_BINARY, levels=c("0", "1"), labels=c("CMV-", "CMV+"))
+
+#Limbic within and between has missing data but only at UW, we need to figure out what to do
+    #we have opted to run separate combats for each set and  merge the combat-ed limbic back into to main sheet
+  
+#Main combat - dropping Limbic and Limbic_to_all due to missing data
+roi <- c("WITHIN_FC", "BTWN_FC", "SEGR_FC", "DMN", "Cont", "DorsAttn", "SalVentAttn", "SomMot", "Visual", "Cont_to_all", "DMN_to_all", "DorsAttn_to_all", "SalVentAttn_to_all", "SomMot_to_all", "Visual_to_all")
+
+###Subset the analysis to include only subjects with data
+rsfc_data <- subset(data, DMN > 0)
+rsfc_data <- subset(rsfc_data,(RSFC_QA_final == 0))
+
+###restrict to the variables you need
+rsfc_data_noLimbic <- rsfc_data[c("INJURYID", 
+                   "mTBI_CMV_PI", 
+                   "VISIT",
+                   "ScanSite",
+                   roi)]
+
+```
+
+## Run ComBat for all non-Limbic ROI
+
+```{r}
+# basic model
+combat_nonLimbic <- longCombat(idvar='INJURYID', 
+             timevar = "VISIT",
+             batchvar='ScanSite', 
+             features= roi,
+             formula="mTBI_CMV_PI*VISIT",
+             ranef='(1|INJURYID)',
+             data=rsfc_data_noLimbic)
+
+rsfc_data_combat_nonLimbic <- combat_nonLimbic$data_combat
+
+```
+
+## Run ComBat for Limbic WTHN ROI
+
+```{r}
+#Limbic combat - dropping  Limbic_to_all but using others. 
+roi <- c("WITHIN_FC", "BTWN_FC", "SEGR_FC", "DMN", "Cont", "DorsAttn", "SalVentAttn", "SomMot", "Visual", "Cont_to_all", "DMN_to_all", "DorsAttn_to_all", "SalVentAttn_to_all", "SomMot_to_all", "Visual_to_all", "Limbic")
+
+###Subset the analysis to include only subjects with data
+## PREVIOUS VERSION EXCLUDED PARTICIPANTS WITH 0, NOW THEY ARE INCLUDED IN THIS VERSION
+## THE LOG VERSION EXCLUDES PARTICIPANTS WITH 0 TO AVOID NEGATIVE INFINITY RESULTS
+rsfc_data1 <- subset(data, !is.na(Limbic))
+rsfc_data1 <- subset(rsfc_data1,(RSFC_QA_final == 0))
+
+
+rsfc_data_LimbWN <- rsfc_data1[c("INJURYID", 
+                   "mTBI_CMV_PI", 
+                   "VISIT",
+                   "ScanSite",
+                   roi)]
+
+# basic model
+combat_LimbWN <- longCombat(idvar='INJURYID', 
+             timevar = "VISIT",
+             batchvar='ScanSite', 
+             features= roi,
+             formula="mTBI_CMV_PI*VISIT",
+             ranef='(1|INJURYID)',
+             data=rsfc_data_LimbWN)
+
+
+#### Get the limbic only variable for merging later
+rsfc_data_combat_LimbicWN <- combat_LimbWN$data_combat  
+rsfc_data_combat_LimbicWN_subset <- rsfc_data_combat_LimbicWN[, c("INJURYID", "VISIT", "Limbic.combat")]
+
+```
+
+## Run ComBat for Limbic BTWN ROI
+
+```{r}
+#Limbic_to_all combat - dropping  Limbic but using others. 
+roi <- c("WITHIN_FC", "BTWN_FC", "SEGR_FC", "DMN", "Cont", "DorsAttn", "SalVentAttn", "SomMot", "Visual", "Cont_to_all", "DMN_to_all", "DorsAttn_to_all", "SalVentAttn_to_all", "SomMot_to_all", "Visual_to_all", "Limbic_to_all")
+
+###Subset the analysis to include only subjects with data
+rsfc_data2 <- subset(data, Limbic_to_all > 0)
+rsfc_data2 <- subset(rsfc_data2,(RSFC_QA_final == 0))
+
+rsfc_data_LimbBTWN <- rsfc_data2[c("INJURYID", 
+                   "mTBI_CMV_PI", 
+                   "VISIT",
+                   "ScanSite",
+                   roi)]
+
+# basic model
+combat_LimbBTWN <- longCombat(idvar='INJURYID', 
+             timevar = "VISIT",
+             batchvar='ScanSite', 
+             features= roi,
+             formula="mTBI_CMV_PI*VISIT",
+             ranef='(1|INJURYID)',
+             data=rsfc_data_LimbBTWN)
+
+
+#### Get the limbic only variable for merging later
+rsfc_data_combat_LimbicBTWN <- combat_LimbBTWN$data_combat    
+rsfc_data_combat_LimbicBTWN_subset <- rsfc_data_combat_LimbicBTWN[, c("INJURYID", "VISIT", "Limbic_to_all.combat")]
+
+```
+
+## Merge the data
+
+```{r}
+#merge with original data that has been filtered to exclude bad RSFC
+rsfc_data_merge01 <- merge(rsfc_data, rsfc_data_combat_nonLimbic, by=c('INJURYID', 'VISIT'), all=TRUE)
+rsfc_data_merge02 <- merge(rsfc_data_merge01, rsfc_data_combat_LimbicWN_subset, by=c('INJURYID', 'VISIT'), all=TRUE)
+rsfc_data_merge <- merge(rsfc_data_merge02, rsfc_data_combat_LimbicBTWN_subset, by=c('INJURYID', 'VISIT'), all=TRUE)
+
+#Save R file (should keep all structure and labels)
+saveRDS(rsfc_data_merge, "/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/MRI/121025/Rdata/data_MRI_PIRPT_RSFCcombat.rds")
+
+
+```
+
+## Quick correl check
+
+```{r}
+cor(rsfc_data_merge$WITHIN_FC.combat, rsfc_data_merge$WITHIN_FC)
+cor(rsfc_data_merge$BTWN_FC.combat, rsfc_data_merge$BTWN_FC)
+
+```
+
+# Plots
+```{r}
+# batch boxplots
+batchBoxplot(idvar='INJURYID', 
+             batchvar='ScanSite.x', 
+             feature='WITHIN_FC',
+             formula='mTBI_CMV_PI*VISIT',
+             ranef='(1|INJURYID)',
+             adjustBatch = FALSE,
+             data=rsfc_data_merge)
+batchBoxplot(idvar='INJURYID', 
+             batchvar='ScanSite.x', 
+             feature='WITHIN_FC.combat',
+             formula='mTBI_CMV_PI*VISIT',
+             ranef='(1|INJURYID)',
+             adjustBatch = FALSE,
+             data=rsfc_data_merge)
+
+batchBoxplot(idvar='INJURYID', 
+             batchvar='ScanSite.x', 
+             feature='BTWN_FC',
+             formula='mTBI_CMV_PI*VISIT',
+             ranef='(1|INJURYID)',
+             adjustBatch = FALSE,
+             data=rsfc_data_merge)
+batchBoxplot(idvar='INJURYID', 
+             batchvar='ScanSite.x', 
+             feature='BTWN_FC.combat',
+             formula='mTBI_CMV_PI*VISIT',
+             ranef='(1|INJURYID)',
+             adjustBatch = FALSE,
+             data=rsfc_data_merge)
+
+# mean boxplots
+boxplot(rsfc_data_merge$WITHIN_FC ~ rsfc_data_merge$ScanSite.x, 
+        main = "PRE: WITHIN_FC by ScanSite",
+        xlab = "ScanSite", 
+        ylab = "WITHIN_FC")
+
+boxplot(rsfc_data_merge$WITHIN_FC.combat ~ rsfc_data_merge$ScanSite.x, 
+        main = "POST: WITHIN_FC by ScanSite",
+        xlab = "ScanSite", 
+        ylab = "WITHIN_FC")
+
+boxplot(rsfc_data_merge$BTWN_FC ~ rsfc_data_merge$ScanSite.x, 
+        main = "PRE: BTWN_FC by ScanSite",
+        xlab = "ScanSite", 
+        ylab = "BTWN_FC")
+
+boxplot(rsfc_data_merge$BTWN_FC.combat ~ rsfc_data_merge$ScanSite.x, 
+        main = "POST: BTWN_FC by ScanSite",
+        xlab = "ScanSite", 
+        ylab = "BTWN_FC")
+
+
+# Additive tests
+addTest(idvar='INJURYID',
+        batchvar='ScanSite.x',
+        features=c('WITHIN_FC','BTWN_FC'),
+        formula='mTBI_CMV_PI*VISIT',
+        ranef='(1|INJURYID)',
+        data=rsfc_data_merge)
+addTest(idvar='INJURYID',
+        batchvar='ScanSite.x',
+        features=c('WITHIN_FC.combat','BTWN_FC.combat'),
+        formula='mTBI_CMV_PI*VISIT',
+        ranef='(1|INJURYID)',
+        data=rsfc_data_merge)
+
+# Multiplicative tests
+multTest(idvar='INJURYID',
+         batchvar='ScanSite.x',
+         features=c('WITHIN_FC','BTWN_FC'),
+         formula='mTBI_CMV_PI*VISIT',
+         ranef='(1|INJURYID)',
+         data=rsfc_data_merge)
+multTest(idvar='INJURYID',
+         batchvar='ScanSite.x',
+         features=c('WITHIN_FC.combat','BTWN_FC.combat'),
+         formula='mTBI_CMV_PI*VISIT',
+         ranef='(1|INJURYID)',
+         data=rsfc_data_merge)
+
+#check all combated ROIs
+addTest(idvar='INJURYID',
+        batchvar='ScanSite.x',
+        features=c("WITHIN_FC.combat", "BTWN_FC.combat", "SEGR_FC.combat", "DMN.combat", "Cont.combat", "DorsAttn.combat", "SalVentAttn.combat", "SomMot.combat", "Visual.combat", "Cont_to_all.combat", "DMN_to_all.combat", "DorsAttn_to_all.combat", "SalVentAttn_to_all.combat", "SomMot_to_all.combat", "Visual_to_all.combat"),
+        formula='mTBI_CMV_PI*VISIT',
+        ranef='(1|INJURYID)',
+        data=rsfc_data_merge)
+multTest(idvar='INJURYID',
+         batchvar='ScanSite.x',
+         features=c("WITHIN_FC.combat", "BTWN_FC.combat", "SEGR_FC.combat", "DMN.combat", "Cont.combat", "DorsAttn.combat", "SalVentAttn.combat", "SomMot.combat", "Visual.combat", "Cont_to_all.combat", "DMN_to_all.combat", "DorsAttn_to_all.combat", "SalVentAttn_to_all.combat", "SomMot_to_all.combat", "Visual_to_all.combat"),
+         formula='mTBI_CMV_PI*VISIT',
+         ranef='(1|INJURYID)',
+         data=rsfc_data_merge)
+
+
+```
