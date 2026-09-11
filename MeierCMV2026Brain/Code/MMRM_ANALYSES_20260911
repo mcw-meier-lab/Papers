@@ -1,0 +1,2116 @@
+################################################
+############## CMV DATA ANALYSIS ############### 
+#### RUN ALL OUTCOMES, EXPORT EXCEL + PLOTS ####
+############ UPDATED SEP 11, 2026 ##############
+######### CODE AUTHOR: M. ANDERSSON ############
+################################################
+
+# TABLE OF CONTENTS
+--------------------
+### PRIMARY ANALYSES ###
+# 0. LOAD LIBRARIES
+# 1a. LOAD DATA 
+# 1b. FIX STRUCTURE
+# 1c. CREATE FOLDERS IN WORKING DIRECTORY WHERE ALL FILES WILL BE SAVED
+# 2. DEFINE OUTCOMES 
+# 3. SAMPLE MODELS
+# 4. FUNCTION TO RUN MMRM + TABLES FOR ONE MODALITY
+# 5. RUN FOR ALL MODALITIES 
+# 6. SAVE COMBINED EXCEL FILES
+# 7. FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY
+  
+### SENSITIVITY ANALYSIS 1 ###
+# 8. IDENTIFY & REMOVE OUTLIERS BY GROUP X VISIT 4 SDs FROM CELL MEAN
+# 9. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# 10. SENSITIVITY - SAVE COMBINED EXCEL FILES
+# 11. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY 
+
+### SENSITIVITY ANALYSIS 2 ###
+# 12. FILTER OUT ATHLETES THAT SUSTAINED MULTIPLE INJURIES OVER STUDY PERIOD
+# 13. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# 14. SENSITIVITY - SAVE COMBINED EXCEL FILES
+# 15. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY 
+  
+### SENSITIVITY ANALYSIS 3 ###
+# 16. WHERE CMV EFFECT IS SIGNIFICANT, FILTER TO ONLY PTS THAT HAVE DATA AT 6 MONTHS
+# 17. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# 18. SENSITIVITY - SAVE COMBINED EXCEL FILES
+# 19. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY 
+  
+### SENSITIVITY ANALYSIS 4 ###
+# 20. RESTRICT TO MILITARY SERVICE MEMBER PARTICIPANTS
+# 21. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# 22. SENSITIVITY - SAVE COMBINED EXCEL FILES
+# 23. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY
+  
+### SENSITIVITY ANALYSIS 5 ###
+# 24. RESTRICT TO NON-MILITARY PARTICIPANTS
+# 25. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# 26. SENSITIVITY - SAVE COMBINED EXCEL FILES
+# 27. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY
+
+
+### PRODUCED FILES
+# FA SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# MD SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# AD SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# RD SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# CORTICAL THICKNESS SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# RESTING STATE FUNCTIONAL CONNECTIVITY SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# CLINICAL MEASURES SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+# BLOOD MEASURES SUMMARIES, ANOVA, JOIN, EMMEANS, CONTRASTS, EFFECT ESTIMATES, PLOTS (2 FILES) + SENSITIVITY (2 FILES)
+
+# --------------------- #
+# 0. LOAD LIBRARIES     #
+# --------------------- #
+library(tidyverse)
+library(mmrm)
+library(car)
+library(emmeans)
+library(broom)
+library(openxlsx)
+library(gridExtra)
+library(grid)
+library(forecast)
+
+# ------------------------------------------------------------------- #
+# 1a. LOAD DATA - SET WORKING DIRECTORY TO WHERE FILES ARE SAVED      #
+# ------------------------------------------------------------------- #
+
+setwd("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526")
+
+FA_data_raw <- readRDS("data_MRI_PIRPT_FAbicombat.rds") # FA
+MD_data_raw <- readRDS("data_MRI_PIRPT_MDbicombat.rds") # MD
+AD_data_raw <- readRDS("data_MRI_PIRPT_ADbicombat.rds") # AD
+RD_data_raw <- readRDS("data_MRI_PIRPT_RDbicombat.rds") # RD
+
+FS_data_raw <- readRDS("data_MRI_PIRPT_FScombat.rds") # CORTICAL THICKNESS
+
+RSFC_data_raw <- readRDS("data_MRI_PIRPT_RSFCcombat.rds") # RESTING STATE FUNCTIONAL CONNECTIVITY
+
+CLIN_data_raw <- readRDS("data_Clin_PIRPT.rds") # CLINICAL DATA
+
+BLOOD_data_raw <- readRDS("data_Blood_PIRPT.rds") # BLOOD DATA
+
+# -------------------- #
+# 1b. FIX STRUCTURE    #
+# -------------------  #
+
+# ---- Function to apply factoring to any dataset ----
+fix_factors <- function(df) {
+  df$mTBI_CMV_PI <- factor(df$mTBI_CMV_PI)
+  df$INJURYID    <- as.factor(df$INJURYID)
+  df$weights     <- df$s_iptw   # copy IPTW weights
+  return(df)
+}
+
+FA_data <- fix_factors(FA_data_raw)
+MD_data <- fix_factors(MD_data_raw)
+AD_data <- fix_factors(AD_data_raw)
+RD_data <- fix_factors(RD_data_raw)
+FS_data <- fix_factors(FS_data_raw)
+RSFC_data <- fix_factors(RSFC_data_raw)
+CLIN_data <- fix_factors(CLIN_data_raw)
+BLOOD_data <- fix_factors(BLOOD_data_raw)
+
+# -------------------------------------------------------------------------- #
+# 1c. CREATE FOLDERS IN WORKING DIRECTORY WHERE ALL FILES WILL BE SAVED      #
+# -------------------------------------------------------------------------- #
+dir.create("primary_analyses", showWarnings = FALSE)
+dir.create("sensitivty_1_outliers", showWarnings = FALSE)
+dir.create("sensitivty_2_1_inj", showWarnings = FALSE)
+dir.create("sensitivty_3_6mo", showWarnings = FALSE)
+dir.create("sensitivty_4_MSA", showWarnings = FALSE)
+dir.create("sensitivty_5_noMSA", showWarnings = FALSE)
+dir.create("sensitivty_6_SRC", showWarnings = FALSE)
+
+# --------------------- #
+# 2. DEFINE OUTCOMES    #    
+# --------------------- #
+
+# DTI OUTCOMES (primary are FA/MD, but running RD/AD as secondary if MD significant)
+
+fa_all_outcomes <- c("fmi_fa.combat","fma_fa.combat", "cst_b_fa.combat", 
+                     "ifo_b_fa.combat","ilf_b_fa.combat", "slf_b_fa.combat")
+
+md_all_outcomes <- c("fmi_md.combat","fma_md.combat", "cst_b_md.combat", 
+                     "ifo_b_md.combat","ilf_b_md.combat", "slf_b_md.combat")
+
+ad_all_outcomes <- c("fmi_ad.combat","fma_ad.combat", "cst_b_ad.combat", 
+                     "ifo_b_ad.combat","ilf_b_ad.combat", "slf_b_ad.combat")
+
+rd_all_outcomes <- c("fmi_rd.combat","fma_rd.combat", "cst_b_rd.combat", 
+                     "ifo_b_rd.combat","ilf_b_rd.combat", "slf_b_rd.combat")
+
+# CORTICAL THICKNESS OUTCOMES (individual ROI investigated pending significant mean thickness)
+
+FS_all_outcomes <- c("lh_MeanThickness_thickness.combat", "rh_MeanThickness_thickness.combat")
+
+# RESTING STATE OUTCOMES (1st tier = Segregation, then WITHIN/BETWEEN, then individual networks as needed)
+
+RSFC_all_outcomes <- c("SEGR_FC.combat", "WITHIN_FC.combat","BTWN_FC.combat",
+                   "DMN.combat", "Cont.combat","DorsAttn.combat",
+                   "SalVentAttn.combat", "SomMot.combat", 
+                   "Visual.combat","Limbic.combat", 
+                   "DMN_to_all.combat", "Cont_to_all.combat", "DorsAttn_to_all.combat",
+                   "SalVentAttn_to_all.combat","SomMot_to_all.combat",
+                   "Visual_to_all.combat","Limbic_to_all.combat")
+
+# CLINICAL OUTCOMES
+
+CLIN_outcomes <- c("ln_scat", "ln_bsi", "ln_bsidep", "ln_bsianx", "ln_bsisom", 
+                   "BESS_TOTALSCORE", "SAC_errors_sqrt", "IM_SPEED", "IM_MEMORY")
+
+# BLOOD OUTCOMES
+
+BLOOD_outcomes <- c("LN_NFL_TRANS", "LN_GFAP_TRANS", "LN_UCHL1_TRANS", "LN_TAU_TRANS",
+              "ln_CRP_Conc_replace_clinical", "ln_TNF_Conc_replace", "ln_IL6_Conc_replace", 
+              "ln_IL10_Conc_replace", "ln_IL1RA_Conc_replace", "ln_IL8_Conc_replace")
+
+# --------------------------------------------------------------------------------------------------- #
+# 3. SAMPLE MODELS (fmi_fa.combat, lh_MeanThickness_thickness.combat, SEGR_FC.combat, ln_scat, LN_NFL)  #
+# --------------------------------------------------------------------------------------------------- #
+
+#####################
+### SAMPLE 1 - FA ###
+#####################
+
+sample_model1 <- mmrm(
+  formula = fmi_fa.combat ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = FA_data,
+  weights = FA_data$weights,
+  method = "Residual",
+  vcov = "Empirical-Bias-Reduced")
+summary(sample_model1)
+
+# OMNIBUS TEST
+Anova(sample_model1, type="III")
+
+# JOINT TEST
+joint_tests(sample_model1, by = "VISIT")
+
+# COMPARISON OF GROUPS AT EACH VISIT
+emmeans(sample_model1, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
+
+# CELL COUNTS AT EACH VISIT
+FA_data %>%
+  group_by(mTBI_CMV_PI, VISIT) %>%
+  summarise(n_nonNA = sum(!is.na(fmi_fa.combat)), .groups = "drop") %>%
+  pivot_wider(
+    names_from = VISIT,
+    values_from = n_nonNA)
+
+#####################################
+### SAMPLE 2 - CORTICAL THICKNESS ###
+#####################################
+
+sample_model2 <- mmrm(
+  formula = lh_MeanThickness_thickness.combat ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = FS_data,
+  weights = FS_data$weights,
+  method = "Residual",
+  vcov = "Empirical-Bias-Reduced")
+summary(sample_model2)
+
+# OMNIBUS TEST
+Anova(sample_model2, type="III")
+
+# JOINT TEST
+joint_tests(sample_model2, by = "VISIT")
+
+# COMPARISON OF GROUPS AT EACH VISIT
+emmeans(sample_model2, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
+
+# CELL COUNTS AT EACH VISIT
+FS_data %>%
+  group_by(mTBI_CMV_PI, VISIT) %>%
+  summarise(n_nonNA = sum(!is.na(lh_MeanThickness_thickness.combat)), .groups = "drop") %>%
+  pivot_wider(
+    names_from = VISIT,
+    values_from = n_nonNA)
+
+#######################
+### SAMPLE 3 - RSFC ###
+#######################
+
+sample_model3 <- mmrm(
+  formula = SEGR_FC.combat ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = RSFC_data,
+  weights = RSFC_data$weights,
+  method = "Residual",
+  vcov = "Empirical-Bias-Reduced")
+summary(sample_model3)
+
+# OMNIBUS TEST
+Anova(sample_model3, type="III")
+
+# JOINT TEST
+joint_tests(sample_model3, by = "VISIT")
+
+# COMPARISON OF GROUPS AT EACH VISIT
+emmeans(sample_model3, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
+
+# CELL COUNTS AT EACH VISIT
+RSFC_data %>%
+  group_by(mTBI_CMV_PI, VISIT) %>%
+  summarise(n_nonNA = sum(!is.na(SEGR_FC.combat)), .groups = "drop") %>%
+  pivot_wider(
+    names_from = VISIT,
+    values_from = n_nonNA)
+
+###########################
+### SAMPLE 4 - CLINICAL ###
+###########################
+
+sample_model4 <- mmrm(
+  formula = ln_scat ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = CLIN_data,
+  weights = CLIN_data$weights,
+  method = "Residual",
+  vcov = "Empirical-Bias-Reduced")
+summary(sample_model4)
+
+# OMNIBUS TEST
+Anova(sample_model4, type="III")
+
+# JOINT TEST
+joint_tests(sample_model4, by = "VISIT")
+
+# COMPARISON OF GROUPS AT EACH VISIT
+emmeans(sample_model4, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
+
+# CELL COUNTS AT EACH VISIT
+CLIN_data %>%
+  group_by(mTBI_CMV_PI, VISIT) %>%
+  summarise(n_nonNA = sum(!is.na(ln_scat)), .groups = "drop") %>%
+  pivot_wider(
+    names_from = VISIT,
+    values_from = n_nonNA)
+
+########################
+### SAMPLE 5 - BLOOD ###
+########################
+
+sample_model5 <- mmrm(
+  formula = LN_NFL ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = BLOOD_data,
+  weights = BLOOD_data$weights,
+  method = "Residual",
+  vcov = "Empirical-Bias-Reduced")
+summary(sample_model5)
+
+# OMNIBUS TEST
+Anova(sample_model5, type="III")
+
+# JOINT TEST
+joint_tests(sample_model5, by = "VISIT")
+
+# COMPARISON OF GROUPS AT EACH VISIT
+emmeans(sample_model5, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
+
+# CELL COUNTS AT EACH VISIT
+BLOOD_data %>%
+  group_by(mTBI_CMV_PI, VISIT) %>%
+  summarise(n_nonNA = sum(!is.na(LN_NFL)), .groups = "drop") %>%
+  pivot_wider(
+    names_from = VISIT,
+    values_from = n_nonNA)
+
+# -------------------------------------------------- #
+# 4. FUNCTION TO RUN MMRM + TABLES FOR ONE MODALITY  #
+# -------------------------------------------------- #
+run_mmrm_for_modality <- function(data, outcomes, label) {
+  
+  summaries <- data.frame()
+  anova_all <- data.frame()
+  joint_all <- data.frame()
+  emmeans_all <- data.frame()
+  emmeans_contrasts_all <- data.frame()
+  cell_counts_all <- data.frame()
+  
+  outcome_col <- paste0(label, "_Outcome")
+  
+  for (out in outcomes) {
+    
+    cat("✔ Performing Mixed Models for Repeated Measures:", label, "-", out, "\n")
+    
+    f <- as.formula(paste0(out, " ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID)"))
+    
+    mod <- mmrm(
+      formula = f,
+      data = data,
+      weights = data$weights,
+      method = "Residual",
+      vcov = "Empirical-Bias-Reduced")
+    
+    # -------------------------
+    # Tidy summary
+    # -------------------------
+    tmp_summary <- broom::tidy(mod)
+    tmp_summary[[outcome_col]] <- out
+    summaries <- bind_rows(summaries, tmp_summary)
+    
+    # -------------------------
+    # ANOVA
+    # -------------------------
+    tmp_aov <- as.data.frame(Anova(mod, type = "III"))
+    tmp_aov <- cbind(Term = rownames(tmp_aov), tmp_aov)
+    rownames(tmp_aov) <- NULL
+    tmp_aov[[outcome_col]] <- out
+    anova_all <- bind_rows(anova_all, tmp_aov)
+    
+    # -------------------------
+    # Joint tests
+    # -------------------------
+    tmp_joint <- as.data.frame(joint_tests(mod, by = "VISIT"))
+    tmp_joint[[outcome_col]] <- out
+    joint_all <- bind_rows(joint_all, tmp_joint)
+    
+    # -------------------------
+    # EMMEANS
+    # -------------------------
+    em <- emmeans(mod, ~ mTBI_CMV_PI | VISIT)
+    
+    tmp_emmeans <- as.data.frame(
+      summary(em)) %>% 
+      mutate(
+        mTBI_CMV_PI = as.character(mTBI_CMV_PI),
+        !!outcome_col := out)
+    
+    emmeans_all <- bind_rows(emmeans_all, tmp_emmeans)
+    
+    # -------------------------
+    # CONTRASTS (infer = TRUE)
+    # -------------------------
+    em_contrasts <- contrast(em, method = "pairwise", adjust = "none")
+    
+    tmp_contrasts <- as.data.frame(
+      summary(em_contrasts, infer = TRUE))
+    
+    if (!"contrast" %in% names(tmp_contrasts)) {
+      tmp_contrasts$contrast <- rownames(tmp_contrasts)
+      rownames(tmp_contrasts) <- NULL
+    }
+    
+    tmp_contrasts[[outcome_col]] <- out
+    emmeans_contrasts_all <- bind_rows(emmeans_contrasts_all, tmp_contrasts)
+    
+    # -------------------------
+    # CELL COUNTS
+    # -------------------------
+    tmp_counts <- data %>% 
+      group_by(VISIT, mTBI_CMV_PI) %>% 
+      summarise(
+        n_non_na = sum(!is.na(.data[[out]])),
+        .groups = "drop") %>% 
+      mutate(
+        mTBI_CMV_PI = as.character(mTBI_CMV_PI),
+        !!outcome_col := out)
+    cell_counts_all <- bind_rows(cell_counts_all, tmp_counts)
+  }
+  
+  # =========================================================
+  # BUILD contrasts_effects
+  # =========================================================
+  
+  contrasts_effects <- emmeans_contrasts_all |>
+    mutate(
+      VISIT = as.character(VISIT),
+      contrast = as.character(contrast),
+      group1 = trimws(gsub("[()]", "", sub("^(.*?) - .*", "\\1", contrast))),
+      group2 = trimws(gsub("[()]", "", sub(".* - (.*)$", "\\1", contrast)))) %>% 
+    
+    # Join emmeans group 1
+    left_join(
+      emmeans_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, emmean, SE) |>
+        rename(group = mTBI_CMV_PI,
+               emmean_g1 = emmean,
+               SE_g1 = SE),
+      by = c(outcome_col, "VISIT", "group1" = "group")) %>% 
+    
+    # Join emmeans group 2
+    left_join(
+      emmeans_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, emmean, SE) |>
+        rename(group = mTBI_CMV_PI,
+               emmean_g2 = emmean,
+               SE_g2 = SE),
+      by = c(outcome_col, "VISIT", "group2" = "group")) %>% 
+    
+    # Join cell counts
+    left_join(
+      cell_counts_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, n_non_na) %>% 
+        rename(group = mTBI_CMV_PI, n1 = n_non_na),
+      by = c(outcome_col, "VISIT", "group1" = "group")) %>% 
+    
+    left_join(
+      cell_counts_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, n_non_na) %>% 
+        rename(group = mTBI_CMV_PI, n2 = n_non_na),
+      by = c(outcome_col, "VISIT", "group2" = "group")) %>% 
+    
+    # Rename contrast columns
+    rename(
+      contrast_estimate = estimate,
+      contrast_p = p.value,
+      contrast_lower = lower.CL,
+      contrast_upper = upper.CL) %>% 
+    
+    # Contrast effect sizes (Cohen's d) using model-based contrast estimates & SEs but cell counts from raw data
+    mutate(
+      SD1 = SE_g1 * sqrt(n1),
+      SD2 = SE_g2 * sqrt(n2),
+      pooled_SD = sqrt(((n1 - 1) * SD1^2 + (n2 - 1) * SD2^2) /
+                         (n1 + n2 - 2)),
+      cohen_d = contrast_estimate / pooled_SD) %>% 
+    
+    select(
+      VISIT,
+      !!sym(outcome_col),
+      group1, emmean_g1,
+      group2, emmean_g2,
+      contrast_estimate, contrast_p,
+      contrast_lower, contrast_upper,
+      n1, n2,
+      pooled_SD, cohen_d)
+  
+  list(
+    summaries = summaries,
+    anova = anova_all,
+    joint = joint_all,
+    emmeans = emmeans_all,
+    emmeans_contrasts = emmeans_contrasts_all,
+    cell_counts = cell_counts_all,
+    contrasts_effects = contrasts_effects)
+}
+
+############################################################################################
+########################            PRIMARY ANALYSES               #########################         
+############################################################################################
+
+# --------------------------- #
+# 5. RUN FOR ALL MODALITIES   #
+# --------------------------- #
+FA_res <- run_mmrm_for_modality(FA_data, fa_all_outcomes, "FA") # FA
+MD_res <- run_mmrm_for_modality(MD_data, md_all_outcomes, "MD") # MD
+AD_res <- run_mmrm_for_modality(AD_data, ad_all_outcomes, "AD") # AD
+RD_res <- run_mmrm_for_modality(RD_data, rd_all_outcomes, "RD") # RD
+
+CTh_res <- run_mmrm_for_modality(FS_data, FS_all_outcomes, "CTh") # CORTICAL THICKNESS
+
+RSFC_res <- run_mmrm_for_modality(RSFC_data, RSFC_all_outcomes, "RSFC") # RESTING STATE FUNCTIONAL CONNECTIVITY
+
+CLIN_res <- run_mmrm_for_modality(CLIN_data, CLIN_outcomes, "CLIN") # CLINICAL
+
+BLOOD_res <- run_mmrm_for_modality(BLOOD_data, BLOOD_outcomes, "BLOOD") # BLOOD
+
+
+# ------------------------------------------------------ #
+# 6. SAVE COMBINED EXCEL FILES (1 FILE, 7 SHEETS EACH)  #
+# ------------------------------------------------------ #
+
+# FA (1 FILE - 7 SHEETS)
+
+wb_FA <- createWorkbook()
+addWorksheet(wb_FA, "FA Summaries"); writeData(wb_FA, "FA Summaries", FA_res$summaries)
+addWorksheet(wb_FA, "FA ANOVA"); writeData(wb_FA, "FA ANOVA", FA_res$anova)
+addWorksheet(wb_FA, "FA Joint"); writeData(wb_FA, "FA Joint", FA_res$joint)
+addWorksheet(wb_FA, "FA Emmeans"); writeData(wb_FA, "FA Emmeans", FA_res$emmeans)
+addWorksheet(wb_FA, "FA Contrasts"); writeData(wb_FA, "FA Contrasts", FA_res$emmeans_contrasts)
+addWorksheet(wb_FA, "FA Cell Counts"); writeData(wb_FA, "FA Cell Counts", FA_res$cell_counts)
+addWorksheet(wb_FA, "FA Effects"); writeData(wb_FA, "FA Effects", FA_res$contrasts_effects)
+saveWorkbook(wb_FA, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_FA_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# MD (1 FILE - 7 SHEETS)
+wb_MD <- createWorkbook()
+addWorksheet(wb_MD, "MD Summaries"); writeData(wb_MD, "MD Summaries", MD_res$summaries)
+addWorksheet(wb_MD, "MD ANOVA"); writeData(wb_MD, "MD ANOVA", MD_res$anova)
+addWorksheet(wb_MD, "MD Joint"); writeData(wb_MD, "MD Joint", MD_res$joint)
+addWorksheet(wb_MD, "MD Emmeans"); writeData(wb_MD, "MD Emmeans", MD_res$emmeans)
+addWorksheet(wb_MD, "MD Contrasts"); writeData(wb_MD, "MD Contrasts", MD_res$emmeans_contrasts)
+addWorksheet(wb_MD, "MD Cell Counts"); writeData(wb_MD, "MD Cell Counts", MD_res$cell_counts)
+addWorksheet(wb_MD, "MD Effects"); writeData(wb_MD, "MD Effects", MD_res$contrasts_effects)
+saveWorkbook(wb_MD, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_MD_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# AD (1 FILE - 7 SHEETS)
+wb_AD <- createWorkbook()
+addWorksheet(wb_AD, "AD Summaries"); writeData(wb_AD, "AD Summaries", AD_res$summaries)
+addWorksheet(wb_AD, "AD ANOVA"); writeData(wb_AD, "AD ANOVA", AD_res$anova)
+addWorksheet(wb_AD, "AD Joint"); writeData(wb_AD, "AD Joint", AD_res$joint)
+addWorksheet(wb_AD, "AD Emmeans"); writeData(wb_AD, "AD Emmeans", AD_res$emmeans)
+addWorksheet(wb_AD, "AD Contrasts"); writeData(wb_AD, "AD Contrasts", AD_res$emmeans_contrasts)
+addWorksheet(wb_AD, "AD Cell Counts"); writeData(wb_AD, "AD Cell Counts", AD_res$cell_counts)
+addWorksheet(wb_AD, "AD Effects"); writeData(wb_AD, "AD Effects", AD_res$contrasts_effects)
+saveWorkbook(wb_AD, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_AD_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# RD (1 FILE - 7 SHEETS)
+wb_RD <- createWorkbook()
+addWorksheet(wb_RD, "RD Summaries"); writeData(wb_RD, "RD Summaries", RD_res$summaries)
+addWorksheet(wb_RD, "RD ANOVA"); writeData(wb_RD, "RD ANOVA", RD_res$anova)
+addWorksheet(wb_RD, "RD Joint"); writeData(wb_RD, "RD Joint", RD_res$joint)
+addWorksheet(wb_RD, "RD Emmeans"); writeData(wb_RD, "RD Emmeans", RD_res$emmeans)
+addWorksheet(wb_RD, "RD Contrasts"); writeData(wb_RD, "RD Contrasts", RD_res$emmeans_contrasts)
+addWorksheet(wb_RD, "RD Cell Counts"); writeData(wb_RD, "RD Cell Counts", RD_res$cell_counts)
+addWorksheet(wb_RD, "RD Effects"); writeData(wb_RD, "RD Effects", RD_res$contrasts_effects)
+saveWorkbook(wb_RD, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_RD_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# CORTICAL THICKNESS (1 FILE - 7 SHEETS)
+
+wb_fs <- createWorkbook()
+addWorksheet(wb_fs, "CTh Summaries"); writeData(wb_fs, "CTh Summaries", CTh_res$summaries)
+addWorksheet(wb_fs, "CTh ANOVA"); writeData(wb_fs, "CTh ANOVA", CTh_res$anova)
+addWorksheet(wb_fs, "CTh Joint"); writeData(wb_fs, "CTh Joint", CTh_res$joint)
+addWorksheet(wb_fs, "CTh Emmeans"); writeData(wb_fs, "CTh Emmeans", CTh_res$emmeans)
+addWorksheet(wb_fs, "CTh Contrasts"); writeData(wb_fs, "CTh Contrasts", CTh_res$emmeans_contrasts)
+addWorksheet(wb_fs, "CTh Cell Counts"); writeData(wb_fs, "CTh Cell Counts", CTh_res$cell_counts)
+addWorksheet(wb_fs, "CTh Effects"); writeData(wb_fs, "CTh Effects", CTh_res$contrasts_effects)
+saveWorkbook(wb_fs, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_CTh_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+
+# RESTING STATE FUNCTIONAL CONNECTIVITY (1 FILE - 7 SHEETS)
+wb_rsfc <- createWorkbook()
+addWorksheet(wb_rsfc, "RSFC Summaries"); writeData(wb_rsfc, "RSFC Summaries", RSFC_res$summaries)
+addWorksheet(wb_rsfc, "RSFC ANOVA"); writeData(wb_rsfc, "RSFC ANOVA", RSFC_res$anova)
+addWorksheet(wb_rsfc, "RSFC Joint"); writeData(wb_rsfc, "RSFC Joint", RSFC_res$joint)
+addWorksheet(wb_rsfc, "RSFC Emmeans"); writeData(wb_rsfc, "RSFC Emmeans", RSFC_res$emmeans)
+addWorksheet(wb_rsfc, "RSFC Contrasts"); writeData(wb_rsfc, "RSFC Contrasts", RSFC_res$emmeans_contrasts)
+addWorksheet(wb_rsfc, "RSFC Cell Counts"); writeData(wb_rsfc, "RSFC Cell Counts", RSFC_res$cell_counts)
+addWorksheet(wb_rsfc, "RSFC Effects"); writeData(wb_rsfc, "RSFC Effects", RSFC_res$contrasts_effects)
+saveWorkbook(wb_rsfc, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_RSFC_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# CLINICAL (1 FILE - 7 SHEETS)
+wb_clin <- createWorkbook()
+addWorksheet(wb_clin, "CLIN Summaries"); writeData(wb_clin, "CLIN Summaries", CLIN_res$summaries)
+addWorksheet(wb_clin, "CLIN ANOVA"); writeData(wb_clin, "CLIN ANOVA", CLIN_res$anova)
+addWorksheet(wb_clin, "CLIN Joint"); writeData(wb_clin, "CLIN Joint", CLIN_res$joint)
+addWorksheet(wb_clin, "CLIN Emmeans"); writeData(wb_clin, "CLIN Emmeans", CLIN_res$emmeans)
+addWorksheet(wb_clin, "CLIN Contrasts"); writeData(wb_clin, "CLIN Contrasts", CLIN_res$emmeans_contrasts)
+addWorksheet(wb_clin, "CLIN Cell Counts"); writeData(wb_clin, "CLIN Cell Counts", CLIN_res$cell_counts)
+addWorksheet(wb_clin, "CLIN Effects"); writeData(wb_clin, "CLIN Effects", CLIN_res$contrasts_effects)
+saveWorkbook(wb_clin, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_CLIN_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+
+# BLOOD (1 FILE - 7 SHEETS)
+wb_blood <- createWorkbook()
+addWorksheet(wb_blood, "BLOOD Summaries"); writeData(wb_blood, "BLOOD Summaries", BLOOD_res$summaries)
+addWorksheet(wb_blood, "BLOOD ANOVA"); writeData(wb_blood, "BLOOD ANOVA", BLOOD_res$anova)
+addWorksheet(wb_blood, "BLOOD Joint"); writeData(wb_blood, "BLOOD Joint", BLOOD_res$joint)
+addWorksheet(wb_blood, "BLOOD Emmeans"); writeData(wb_blood, "BLOOD Emmeans", BLOOD_res$emmeans)
+addWorksheet(wb_blood, "BLOOD Contrasts"); writeData(wb_blood, "BLOOD Contrasts", BLOOD_res$emmeans_contrasts)
+addWorksheet(wb_blood, "BLOOD Cell Counts"); writeData(wb_blood, "BLOOD Cell Counts", BLOOD_res$cell_counts)
+addWorksheet(wb_blood, "BLOOD Effects"); writeData(wb_blood, "BLOOD Effects", BLOOD_res$contrasts_effects)
+saveWorkbook(wb_blood, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/mmrm_results_BLOOD_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# ----------------------------------------------------------- #
+# 7. FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY  #
+# ----------------------------------------------------------- #
+
+plot_modality <- function(data, outcomes, label, pdf_file) {
+  
+  pdf(pdf_file, width = 14, height = 14)
+  
+  for (out in outcomes) {
+    
+    cat("✔ Generating Plots:", label, "-", out, "\n")
+    
+    # 1. Fit MMRM model
+    f <- as.formula(paste0(out, " ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID)"))
+    mod <- mmrm(
+      formula = f,
+      data = data,
+      weights = data$weights,
+      method = "Residual",
+      vcov = "Empirical-Bias-Reduced")
+    
+    # Use model frame from the model
+    model_df <- stats::model.frame(mod)
+    
+    # 2. EMM plots
+    res_emm <- emmeans(mod, pairwise ~ mTBI_CMV_PI | VISIT,
+                       adjust = "none")
+    
+    emm_df <- summary(res_emm$emmeans, infer = c(TRUE, TRUE)) %>%
+      as.data.frame() %>%
+      mutate(mTBI_CMV_PI = factor(mTBI_CMV_PI))
+    
+    pal <- setNames(
+      c("#648FFF", "#785EF0", "#DC267F", "#FE6100")[seq_along(levels(emm_df$mTBI_CMV_PI))],
+      levels(emm_df$mTBI_CMV_PI))
+    
+    p1 <- ggplot(emm_df, aes(VISIT, emmean, color = mTBI_CMV_PI, group = mTBI_CMV_PI)) +
+      geom_line(position = position_dodge(0.2)) +
+      geom_point(position = position_dodge(0.2)) +
+      geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+                    width = 0.1, position = position_dodge(0.2)) +
+      scale_color_manual(values = pal) +
+      labs(title = paste("EMM by group:", out),
+           x = "VISIT", y = "Estimated mean (EMM)", color = "mTBI_CMV_PI") +
+      theme_bw()
+    
+    # Contrast plot
+    contr_df <- summary(res_emm$contrasts, infer = c(TRUE, TRUE), level = 0.95) %>%
+      as.data.frame()
+    
+    p2 <- ggplot(contr_df, aes(x = VISIT, y = estimate)) +
+      geom_hline(yintercept = 0, linetype = 2) +
+      geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL)) +
+      facet_wrap(~ contrast) +
+      labs(title = paste("Pairwise contrasts:", out),
+           y = "Difference in EMM (95% CI)") +
+      theme_bw()
+    
+    # 3. Residual diagnostics
+    res_vals <- residuals(mod)
+    fit_vals <- fitted(mod)
+    std_res <- scale(res_vals)
+    
+    p3 <- ggplot(data.frame(res_vals), aes(x = res_vals)) +
+      geom_histogram(fill = "lightblue", color = "white", bins = 30) +
+      labs(title = "Histogram of Residuals") +
+      theme_bw()
+    
+    p4 <- ggplot(data.frame(res_vals = res_vals), aes(sample = res_vals)) +
+      stat_qq() + stat_qq_line(color = "red") +
+      labs(title = "Q-Q Plot of Residuals") +
+      theme_bw()
+    
+    p5 <- ggplot(data.frame(fit_vals, res_vals), aes(x = fit_vals, y = res_vals)) +
+      geom_point() +
+      geom_hline(yintercept = 0, linetype = 2, color = "red") +
+      labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+      theme_bw()
+    
+    acf_obj <- acf(res_vals, plot = FALSE)
+    acf_df <- with(acf_obj, data.frame(lag = lag, acf = acf))
+    
+    p6 <- ggplot(acf_df, aes(x = lag, y = acf)) +
+      geom_bar(stat = "identity", fill = "lightgreen") +
+      labs(title = "ACF of Residuals") +
+      theme_bw()
+    
+    # --- 7. Outlier plot (|Z| > 4) ---
+    outlier_df <- data.frame(
+      idx = seq_along(std_res),
+      std_res = as.numeric(std_res),
+      is_outlier = abs(std_res) > 4)
+    
+    p7 <- ggplot(outlier_df, aes(x = idx, y = std_res)) +
+      geom_segment(aes(xend = idx, yend = 0)) +
+      geom_point(aes(color = is_outlier), size = 2) +
+      scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"),
+                         labels = c("FALSE" = "OK", "TRUE" = "Outlier"),
+                         name = "Flagged") +
+      geom_hline(yintercept = c(-4, 4), linetype = 2, color = "red") +
+      labs(title = "Flagged Outliers (|Z| > 4)",
+           x = "Observation",
+           y = "Standardized Residual (Z-score)") +
+      theme_bw()
+    
+    # --- 8. Outlier table + counts based on model data ---
+    outlier_idx <- which(abs(std_res) > 4)
+    outlier_ids <- model_df$INJURYID[outlier_idx]
+    outlier_visit <- model_df$VISIT[outlier_idx]
+    
+    # Wide count table excluding NAs
+    count_df <- model_df %>%
+      dplyr::filter(!is.na(.data[[out]])) %>%
+      dplyr::count(mTBI_CMV_PI, VISIT) %>%
+      tidyr::pivot_wider(
+        names_from = VISIT,
+        values_from = n,
+        values_fill = 0)
+    
+    # Add overall row
+    if (ncol(count_df) > 1) {
+      sums <- colSums(count_df[ , -1, drop = FALSE])
+      count_df <- dplyr::add_row(count_df, !!!setNames(as.list(sums), names(count_df)[-1]), mTBI_CMV_PI = "Overall")
+    } else {
+      count_df <- dplyr::add_row(count_df, mTBI_CMV_PI = "Overall")
+    }
+    
+    # Outlier table
+    if (length(outlier_idx) == 0) {
+      outlier_tbl <- textGrob("No outliers detected",
+                              gp = gpar(fontsize = 10, fontface = "italic"))
+    } else {
+      outlier_tbl <- tableGrob(
+        data.frame(
+          INJURYID = outlier_ids,
+          VISIT = outlier_visit,
+          Zscore = round(std_res[outlier_idx], 4)
+        ),
+        rows = NULL,
+        theme = ttheme_minimal(base_size = 7)
+      )
+    }
+    
+    # Count table
+    count_tbl <- tableGrob(
+      count_df,
+      rows = NULL,
+      theme = ttheme_minimal(base_size = 7))
+    
+    # Add subtitles
+    outlier_block <- arrangeGrob(
+      textGrob("Flagged Residual Outliers",
+               gp = gpar(fontsize = 12, fontface = "bold")),
+      outlier_tbl,
+      ncol = 1,
+      heights = c(0.2, 0.8))
+    
+    count_block <- arrangeGrob(
+      textGrob("N per Group and Visit",
+               gp = gpar(fontsize = 12, fontface = "bold")),
+      count_tbl,
+      ncol = 1,
+      heights = c(0.2, 0.8))
+    
+    # Combine into final p8
+    p8 <- arrangeGrob(
+      arrangeGrob(outlier_block, count_block, ncol = 2))
+    
+    # 4. Arrange plots with bold top title
+    top_title <- textGrob(
+      paste(label, "Outcome:", out),
+      gp = gpar(fontsize = 20, fontface = "bold"))
+    
+    grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, ncol = 2, top = top_title)
+  }
+  
+  dev.off()
+  cat("✔ All", label, "plots saved to", pdf_file, "\n")
+}
+
+# Generate separate PDFs, one per modality
+plot_modality(FA_data, fa_all_outcomes, "FA", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/fa_plots_", Sys.Date(), ".pdf"))
+plot_modality(MD_data, md_all_outcomes, "MD", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/md_plots_", Sys.Date(), ".pdf"))
+plot_modality(AD_data, ad_all_outcomes, "AD", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/ad_plots_", Sys.Date(), ".pdf"))
+plot_modality(RD_data, rd_all_outcomes, "RD", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/rd_plots_", Sys.Date(), ".pdf"))
+
+plot_modality(FS_data, FS_all_outcomes, "CTh", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/FS_plots_", Sys.Date(), ".pdf"))
+
+plot_modality(RSFC_data, RSFC_all_outcomes, "RSFC", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/RSFC_plots_", Sys.Date(), ".pdf"))
+
+plot_modality(CLIN_data, CLIN_outcomes, "CLIN", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/CLIN_plots_", Sys.Date(), ".pdf"))
+
+plot_modality(BLOOD_data, BLOOD_outcomes, "BLOOD", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/primary_analyses/BLOOD_plots_", Sys.Date(), ".pdf"))
+
+
+############################################################################################
+#####################            SENSITIVITY ANALYSES 1              #######################        
+############################################################################################
+
+# -------------------------------------------------------------------- #
+# 8. IDENTIFY & REMOVE OUTLIERS BY GROUP X VISIT 4 SDs FROM CELL MEAN  #
+# -------------------------------------------------------------------- #
+
+### CREATE SENSITIVITY DATASET WITH PER-TIMEPOINT RAW-Z OUTLIERS (|Z| > 4) ###
+### FUNCTION WILL LOOP THROUGH EACH OUTCOME, IDENTIFY CELLS WHERE |Z| > 4, ###
+### THEN MAKE THAT CELL NA. OTHER VISITS FOR THAT INJURYID WILL BE KEPT    ###
+
+create_sensitivity_dataset <- function(data, outcomes, z_thresh = 4) {
+  
+  sens_data <- data  # start with a copy of the dataset
+  
+  for (out in outcomes) {
+    
+    cat("✔ Processing outcome:", out, "\n")
+    
+    # ---------------------------
+    # Step 1: Compute raw-score z by VISIT × GROUP
+    # ---------------------------
+    sens_data <- sens_data %>%
+      dplyr::group_by(VISIT, mTBI_CMV_PI) %>%
+      dplyr::mutate(
+        z_score = as.numeric(scale(.data[[out]]))
+      ) %>%
+      dplyr::ungroup()
+    # ---------------------------
+    # Step 2: Flag outlier timepoints and set them to NA
+    # ---------------------------
+    flagged <- abs(sens_data$z_score) > z_thresh
+    sens_data[[out]][flagged] <- NA
+    # ---------------------------
+    # Step 3: Report number of flagged values
+    # ---------------------------
+    n_flagged <- sum(flagged, na.rm = TRUE)
+    if (n_flagged > 0) {
+      cat("   → Flagged", n_flagged, "outlier values for", out, "\n")
+    } else {
+      cat("   → No outliers detected for", out, "\n")
+    }
+    # ---------------------------
+    # Step 4: Clean up temporary column
+    # ---------------------------
+    sens_data <- dplyr::select(sens_data, -z_score)
+  }
+  return(sens_data)
+}
+
+
+FA_data_sens <- create_sensitivity_dataset(FA_data, fa_all_outcomes, z_thresh = 4)
+MD_data_sens <- create_sensitivity_dataset(MD_data, md_all_outcomes, z_thresh = 4)
+RD_data_sens <- create_sensitivity_dataset(RD_data, rd_all_outcomes, z_thresh = 4)
+AD_data_sens <- create_sensitivity_dataset(AD_data, ad_all_outcomes, z_thresh = 4)
+
+FS_data_sens <- create_sensitivity_dataset(FS_data, FS_all_outcomes, z_thresh = 4)
+
+RSFC_data_sens <- create_sensitivity_dataset(RSFC_data, RSFC_all_outcomes, z_thresh = 4)
+
+CLIN_data_sens <- create_sensitivity_dataset(CLIN_data, CLIN_outcomes, z_thresh = 4)
+
+BLOOD_data_sens <- create_sensitivity_dataset(BLOOD_data, BLOOD_outcomes, z_thresh = 4)
+
+# --------------------------------------------- #
+# 9. RERUN MMRM MODELS ON SENSITIVITY DATASETS  #
+# --------------------------------------------- #
+
+FA_res_sens <- run_mmrm_for_modality(FA_data_sens, fa_all_outcomes, "FA_sens") # FA
+MD_res_sens <- run_mmrm_for_modality(MD_data_sens, md_all_outcomes, "MD_sens") # MD
+AD_res_sens <- run_mmrm_for_modality(AD_data_sens, ad_all_outcomes, "AD_sens") # AD
+RD_res_sens <- run_mmrm_for_modality(RD_data_sens, rd_all_outcomes, "RD_sens") # RD
+
+CTh_res_sens <- run_mmrm_for_modality(FS_data_sens, FS_all_outcomes, "CTh_sens") # CORTICAL THICKNESS
+
+RSFC_res_sens <- run_mmrm_for_modality(RSFC_data_sens, RSFC_all_outcomes, "RSFC_sens") # RESTING STATE FUNCTIONAL CONNECTIVITY 
+
+CLIN_res_sens <- run_mmrm_for_modality(CLIN_data_sens, CLIN_outcomes, "CLIN_sens") # CLINICAL
+
+BLOOD_res_sens <- run_mmrm_for_modality(BLOOD_data_sens, BLOOD_outcomes, "BLOOD_sens") # BLOOD
+
+# ------------------------------------------------------ #
+# 10. SAVE COMBINED EXCEL FILES  (1 FILE, 7 SHEETS EACH)  #
+# ------------------------------------------------------ #
+
+# FA SENSITIVITY (1 FILE - 7 SHEETS)
+
+wb_FA_sens <- createWorkbook()
+addWorksheet(wb_FA_sens, "FA_sens Summaries"); writeData(wb_FA_sens, "FA_sens Summaries", FA_res_sens$summaries)
+addWorksheet(wb_FA_sens, "FA_sens ANOVA"); writeData(wb_FA_sens, "FA_sens ANOVA", FA_res_sens$anova)
+addWorksheet(wb_FA_sens, "FA_sens Joint"); writeData(wb_FA_sens, "FA_sens Joint", FA_res_sens$joint)
+addWorksheet(wb_FA_sens, "FA_sens Emmeans"); writeData(wb_FA_sens, "FA_sens Emmeans", FA_res_sens$emmeans)
+addWorksheet(wb_FA_sens, "FA_sens Contrasts"); writeData(wb_FA_sens, "FA_sens Contrasts", FA_res_sens$emmeans_contrasts)
+addWorksheet(wb_FA_sens, "FA_sens Cell Counts"); writeData(wb_FA_sens, "FA_sens Cell Counts", FA_res_sens$cell_counts)
+addWorksheet(wb_FA_sens, "FA_sens Effects"); writeData(wb_FA_sens, "FA_sens Effects", FA_res_sens$contrasts_effects)
+saveWorkbook(wb_FA_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_FA_sens_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# MD (1 FILE - 7 SHEETS)
+wb_MD_sens <- createWorkbook()
+addWorksheet(wb_MD_sens, "MD_sens Summaries"); writeData(wb_MD_sens, "MD_sens Summaries", MD_res_sens$summaries)
+addWorksheet(wb_MD_sens, "MD_sens ANOVA"); writeData(wb_MD_sens, "MD_sens ANOVA", MD_res_sens$anova)
+addWorksheet(wb_MD_sens, "MD_sens Joint"); writeData(wb_MD_sens, "MD_sens Joint", MD_res_sens$joint)
+addWorksheet(wb_MD_sens, "MD_sens Emmeans"); writeData(wb_MD_sens, "MD_sens Emmeans", MD_res_sens$emmeans)
+addWorksheet(wb_MD_sens, "MD_sens Contrasts"); writeData(wb_MD_sens, "MD_sens Contrasts", MD_res_sens$emmeans_contrasts)
+addWorksheet(wb_MD_sens, "MD_sens Cell Counts"); writeData(wb_MD_sens, "MD_sens Cell Counts", MD_res_sens$cell_counts)
+addWorksheet(wb_MD_sens, "MD_sens Effects"); writeData(wb_MD_sens, "MD_sens Effects", MD_res_sens$contrasts_effects)
+saveWorkbook(wb_MD_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_MD_sens_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# AD (1 FILE - 7 SHEETS)
+wb_AD_sens <- createWorkbook()
+addWorksheet(wb_AD_sens, "AD_sens Summaries"); writeData(wb_AD_sens, "AD_sens Summaries", AD_res_sens$summaries)
+addWorksheet(wb_AD_sens, "AD_sens ANOVA"); writeData(wb_AD_sens, "AD_sens ANOVA", AD_res_sens$anova)
+addWorksheet(wb_AD_sens, "AD_sens Joint"); writeData(wb_AD_sens, "AD_sens Joint", AD_res_sens$joint)
+addWorksheet(wb_AD_sens, "AD_sens Emmeans"); writeData(wb_AD_sens, "AD_sens Emmeans", AD_res_sens$emmeans)
+addWorksheet(wb_AD_sens, "AD_sens Contrasts"); writeData(wb_AD_sens, "AD_sens Contrasts", AD_res_sens$emmeans_contrasts)
+addWorksheet(wb_AD_sens, "AD_sens Cell Counts"); writeData(wb_AD_sens, "AD_sens Cell Counts", AD_res_sens$cell_counts)
+addWorksheet(wb_AD_sens, "AD_sens Effects"); writeData(wb_AD_sens, "AD_sens Effects", AD_res_sens$contrasts_effects)
+saveWorkbook(wb_AD_sens,  paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_AD_sens_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# RD (1 FILE - 7 SHEETS)
+wb_RD_sens <- createWorkbook()
+addWorksheet(wb_RD_sens, "RD_sens Summaries"); writeData(wb_RD_sens, "RD_sens Summaries", RD_res_sens$summaries)
+addWorksheet(wb_RD_sens, "RD_sens ANOVA"); writeData(wb_RD_sens, "RD_sens ANOVA", RD_res_sens$anova)
+addWorksheet(wb_RD_sens, "RD_sens Joint"); writeData(wb_RD_sens, "RD_sens Joint", RD_res_sens$joint)
+addWorksheet(wb_RD_sens, "RD_sens Emmeans"); writeData(wb_RD_sens, "RD_sens Emmeans", RD_res_sens$emmeans)
+addWorksheet(wb_RD_sens, "RD_sens Contrasts"); writeData(wb_RD_sens, "RD_sens Contrasts", RD_res_sens$emmeans_contrasts)
+addWorksheet(wb_RD_sens, "RD_sens Cell Counts"); writeData(wb_RD_sens, "RD_sens Cell Counts", RD_res_sens$cell_counts)
+addWorksheet(wb_RD_sens, "RD_sens Effects"); writeData(wb_RD_sens, "RD_sens Effects", RD_res_sens$contrasts_effects)
+saveWorkbook(wb_RD_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_RD_sens_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# CORTICAL THICKNESS (1 FILE - 7 SHEETS)
+wb_fs_sens <- createWorkbook()
+addWorksheet(wb_fs_sens, "CTh_sens Summaries"); writeData(wb_fs_sens, "CTh_sens Summaries", CTh_res_sens$summaries)
+addWorksheet(wb_fs_sens, "CTh_sens ANOVA"); writeData(wb_fs_sens, "CTh_sens ANOVA", CTh_res_sens$anova)
+addWorksheet(wb_fs_sens, "CTh_sens Joint"); writeData(wb_fs_sens, "CTh_sens Joint", CTh_res_sens$joint)
+addWorksheet(wb_fs_sens, "CTh_sens Emmeans"); writeData(wb_fs_sens, "CTh_sens Emmeans", CTh_res_sens$emmeans)
+addWorksheet(wb_fs_sens, "CTh_sens Contrasts"); writeData(wb_fs_sens, "CTh_sens Contrasts", CTh_res_sens$emmeans_contrasts)
+addWorksheet(wb_fs_sens, "CTh_sens Cell Counts"); writeData(wb_fs_sens, "CTh_sens Cell Counts", CTh_res_sens$cell_counts)
+addWorksheet(wb_fs_sens, "CTh_sens Effects"); writeData(wb_fs_sens, "CTh_sens Effects", CTh_res_sens$contrasts_effects)
+saveWorkbook(wb_fs_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_CTh_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# RESTING STATE FUNCTIONAL CONNECTIVITY (1 FILE - 7 SHEETS)
+wb_rsfc_sens <- createWorkbook()
+addWorksheet(wb_rsfc_sens, "RSFC_sens Summaries"); writeData(wb_rsfc_sens, "RSFC_sens Summaries", RSFC_res_sens$summaries)
+addWorksheet(wb_rsfc_sens, "RSFC_sens ANOVA"); writeData(wb_rsfc_sens, "RSFC_sens ANOVA", RSFC_res_sens$anova)
+addWorksheet(wb_rsfc_sens, "RSFC_sens Joint"); writeData(wb_rsfc_sens, "RSFC_sens Joint", RSFC_res_sens$joint)
+addWorksheet(wb_rsfc_sens, "RSFC_sens Emmeans"); writeData(wb_rsfc_sens, "RSFC_sens Emmeans", RSFC_res_sens$emmeans)
+addWorksheet(wb_rsfc_sens, "RSFC_sens Contrasts"); writeData(wb_rsfc_sens, "RSFC_sens Contrasts", RSFC_res_sens$emmeans_contrasts)
+addWorksheet(wb_rsfc_sens, "RSFC_sens Cell Counts"); writeData(wb_rsfc_sens, "RSFC_sens Cell Counts", RSFC_res_sens$cell_counts)
+addWorksheet(wb_rsfc_sens, "RSFC_sens Effects"); writeData(wb_rsfc_sens, "RSFC_sens Effects", RSFC_res_sens$contrasts_effects)
+saveWorkbook(wb_rsfc_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_RSFC_sens_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# CLINICAL (1 FILE - 7 SHEETS)
+wb_clin_sens <- createWorkbook()
+addWorksheet(wb_clin_sens, "CLIN_sens Summaries"); writeData(wb_clin_sens, "CLIN_sens Summaries", CLIN_res_sens$summaries)
+addWorksheet(wb_clin_sens, "CLIN_sens ANOVA"); writeData(wb_clin_sens, "CLIN_sens ANOVA", CLIN_res_sens$anova)
+addWorksheet(wb_clin_sens, "CLIN_sens Joint"); writeData(wb_clin_sens, "CLIN_sens Joint", CLIN_res_sens$joint)
+addWorksheet(wb_clin_sens, "CLIN_sens Emmeans"); writeData(wb_clin_sens, "CLIN_sens Emmeans", CLIN_res_sens$emmeans)
+addWorksheet(wb_clin_sens, "CLIN_sens Contrasts"); writeData(wb_clin_sens, "CLIN_sens Contrasts", CLIN_res_sens$emmeans_contrasts)
+addWorksheet(wb_clin_sens, "CLIN_sens Cell Counts"); writeData(wb_clin_sens, "CLIN_sens Cell Counts", CLIN_res_sens$cell_counts)
+addWorksheet(wb_clin_sens, "CLIN_sens Effects"); writeData(wb_clin_sens, "CLIN_sens Effects", CLIN_res_sens$contrasts_effects)
+saveWorkbook(wb_clin_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_CLIN_sens_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# BLOOD (1 FILE - 7 SHEETS)
+wb_blood_sens <- createWorkbook()
+addWorksheet(wb_blood_sens, "BLOOD_sens Summaries"); writeData(wb_blood_sens, "BLOOD_sens Summaries", BLOOD_res_sens$summaries)
+addWorksheet(wb_blood_sens, "BLOOD_sens ANOVA"); writeData(wb_blood_sens, "BLOOD_sens ANOVA", BLOOD_res_sens$anova)
+addWorksheet(wb_blood_sens, "BLOOD_sens Joint"); writeData(wb_blood_sens, "BLOOD_sens Joint", BLOOD_res_sens$joint)
+addWorksheet(wb_blood_sens, "BLOOD_sens Emmeans"); writeData(wb_blood_sens, "BLOOD_sens Emmeans", BLOOD_res_sens$emmeans)
+addWorksheet(wb_blood_sens, "BLOOD_sens Contrasts"); writeData(wb_blood_sens, "BLOOD_sens Contrasts", BLOOD_res_sens$emmeans_contrasts)
+addWorksheet(wb_blood_sens, "BLOOD_sens Cell Counts"); writeData(wb_blood_sens, "BLOOD_sens Cell Counts", BLOOD_res_sens$cell_counts)
+addWorksheet(wb_blood_sens, "BLOOD_sens Effects"); writeData(wb_blood_sens, "BLOOD_sens Effects", BLOOD_res_sens$contrasts_effects)
+saveWorkbook(wb_blood_sens, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/mmrm_results_BLOOD_sens_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# ----------------------------------------------------------- #
+# 11. FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY  #
+# ----------------------------------------------------------- #
+
+plot_modality(FA_data_sens, fa_all_outcomes, "FA_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/fa_plots_sens_", Sys.Date(), ".pdf"))
+plot_modality(MD_data_sens, md_all_outcomes, "MD_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/md_plots_sens_", Sys.Date(), ".pdf"))
+plot_modality(AD_data_sens, ad_all_outcomes, "AD_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/ad_plots_sens_", Sys.Date(), ".pdf"))
+plot_modality(RD_data_sens, rd_all_outcomes, "RD_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/rd_plots_sens_", Sys.Date(), ".pdf"))
+
+plot_modality(FS_data_sens, FS_all_outcomes, "CTh_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/FS_plots_sens_", Sys.Date(), ".pdf"))
+
+plot_modality(RSFC_data_sens, RSFC_all_outcomes, "RSFC_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/RSFC_plots_sens_", Sys.Date(), ".pdf"))
+
+plot_modality(CLIN_data_sens, CLIN_outcomes, "CLIN_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/CLIN_plots_sens_", Sys.Date(), ".pdf"))
+
+plot_modality(BLOOD_data_sens, BLOOD_outcomes, "BLOOD_sens", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_1_outliers/BLOOD_plots_sens_", Sys.Date(), ".pdf"))
+
+############################################################################################
+#####################            SENSITIVITY ANALYSES 2              #######################        
+############################################################################################
+
+# ------------------------------------------------------------------------- #
+# 12. FILTER OUT ATHLETES THAT SUSTAINED MULTIPLE INJURIES OVER STUDY PERIOD
+# ------------------------------------------------------------------------- #
+
+FA_data_1_inj <- FA_data %>% filter(INJURYNUM_New == 1)
+MD_data_1_inj <- MD_data %>% filter(INJURYNUM_New == 1)
+AD_data_1_inj <- AD_data %>% filter(INJURYNUM_New == 1)
+RD_data_1_inj <- RD_data %>% filter(INJURYNUM_New == 1)
+FS_data_1_inj <- FS_data %>% filter(INJURYNUM_New == 1)
+RSFC_data_1_inj <- RSFC_data %>% filter(INJURYNUM_New == 1)
+CLIN_data_1_inj <- CLIN_data %>% filter(INJURYNUM_New == 1)
+BLOOD_data_1_inj <- BLOOD_data %>% filter(INJURYNUM_New == 1)
+
+# --------------------------------------------------------------- #
+# 13. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# --------------------------------------------------------------- #
+
+FA_res_1_inj <- run_mmrm_for_modality(FA_data_1_inj, fa_all_outcomes, "FA_1_inj") # FA
+MD_res_1_inj <- run_mmrm_for_modality(MD_data_1_inj, md_all_outcomes, "MD_1_inj") # MD
+AD_res_1_inj <- run_mmrm_for_modality(AD_data_1_inj, ad_all_outcomes, "AD_1_inj") # AD
+RD_res_1_inj <- run_mmrm_for_modality(RD_data_1_inj, rd_all_outcomes, "RD_1_inj") # RD
+
+CTh_res_1_inj <- run_mmrm_for_modality(FS_data_1_inj, FS_all_outcomes, "CTh_1_inj") # CORTICAL THICKNESS
+
+RSFC_res_1_inj <- run_mmrm_for_modality(RSFC_data_1_inj, RSFC_all_outcomes, "RSFC_1_inj") # RESTING STATE FUNCTIONAL CONNECTIVITY 
+
+CLIN_res_1_inj <- run_mmrm_for_modality(CLIN_data_1_inj, CLIN_outcomes, "CLIN_1_inj") # CLINICAL
+
+BLOOD_res_1_inj <- run_mmrm_for_modality(BLOOD_data_1_inj, BLOOD_outcomes, "BLOOD_1_inj") # BLOOD
+
+# --------------------------------------------------------------- #
+# 14. SAVE COMBINED EXCEL FILES (1 FILE, 7 SHEETS EACH)  #
+# --------------------------------------------------------------- #
+
+# FA SENSITIVITY (1 FILE - 7 SHEETS)
+
+wb_FA_1_inj <- createWorkbook()
+addWorksheet(wb_FA_1_inj, "FA_1_inj Summaries"); writeData(wb_FA_1_inj, "FA_1_inj Summaries", FA_res_1_inj$summaries)
+addWorksheet(wb_FA_1_inj, "FA_1_inj ANOVA"); writeData(wb_FA_1_inj, "FA_1_inj ANOVA", FA_res_1_inj$anova)
+addWorksheet(wb_FA_1_inj, "FA_1_inj Joint"); writeData(wb_FA_1_inj, "FA_1_inj Joint", FA_res_1_inj$joint)
+addWorksheet(wb_FA_1_inj, "FA_1_inj Emmeans"); writeData(wb_FA_1_inj, "FA_1_inj Emmeans", FA_res_1_inj$emmeans)
+addWorksheet(wb_FA_1_inj, "FA_1_inj Contrasts"); writeData(wb_FA_1_inj, "FA_1_inj Contrasts", FA_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_FA_1_inj, "FA_1_inj Cell Counts"); writeData(wb_FA_1_inj, "FA_1_inj Cell Counts", FA_res_1_inj$cell_counts)
+addWorksheet(wb_FA_1_inj, "FA_1_inj Effects"); writeData(wb_FA_1_inj, "FA_1_inj Effects", FA_res_1_inj$contrasts_effects)
+saveWorkbook(wb_FA_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_FA_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# MD (1 FILE - 7 SHEETS)
+wb_MD_1_inj <- createWorkbook()
+addWorksheet(wb_MD_1_inj, "MD_1_inj Summaries"); writeData(wb_MD_1_inj, "MD_1_inj Summaries", MD_res_1_inj$summaries)
+addWorksheet(wb_MD_1_inj, "MD_1_inj ANOVA"); writeData(wb_MD_1_inj, "MD_1_inj ANOVA", MD_res_1_inj$anova)
+addWorksheet(wb_MD_1_inj, "MD_1_inj Joint"); writeData(wb_MD_1_inj, "MD_1_inj Joint", MD_res_1_inj$joint)
+addWorksheet(wb_MD_1_inj, "MD_1_inj Emmeans"); writeData(wb_MD_1_inj, "MD_1_inj Emmeans", MD_res_1_inj$emmeans)
+addWorksheet(wb_MD_1_inj, "MD_1_inj Contrasts"); writeData(wb_MD_1_inj, "MD_1_inj Contrasts", MD_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_MD_1_inj, "MD_1_inj Cell Counts"); writeData(wb_MD_1_inj, "MD_1_inj Cell Counts", MD_res_1_inj$cell_counts)
+addWorksheet(wb_MD_1_inj, "MD_1_inj Effects"); writeData(wb_MD_1_inj, "MD_1_inj Effects", MD_res_1_inj$contrasts_effects)
+saveWorkbook(wb_MD_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_MD_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# AD (1 FILE - 7 SHEETS)
+wb_AD_1_inj <- createWorkbook()
+addWorksheet(wb_AD_1_inj, "AD_1_inj Summaries"); writeData(wb_AD_1_inj, "AD_1_inj Summaries", AD_res_1_inj$summaries)
+addWorksheet(wb_AD_1_inj, "AD_1_inj ANOVA"); writeData(wb_AD_1_inj, "AD_1_inj ANOVA", AD_res_1_inj$anova)
+addWorksheet(wb_AD_1_inj, "AD_1_inj Joint"); writeData(wb_AD_1_inj, "AD_1_inj Joint", AD_res_1_inj$joint)
+addWorksheet(wb_AD_1_inj, "AD_1_inj Emmeans"); writeData(wb_AD_1_inj, "AD_1_inj Emmeans", AD_res_1_inj$emmeans)
+addWorksheet(wb_AD_1_inj, "AD_1_inj Contrasts"); writeData(wb_AD_1_inj, "AD_1_inj Contrasts", AD_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_AD_1_inj, "AD_1_inj Cell Counts"); writeData(wb_AD_1_inj, "AD_1_inj Cell Counts", AD_res_1_inj$cell_counts)
+addWorksheet(wb_AD_1_inj, "AD_1_inj Effects"); writeData(wb_AD_1_inj, "AD_1_inj Effects", AD_res_1_inj$contrasts_effects)
+saveWorkbook(wb_AD_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_AD_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# RD (1 FILE - 7 SHEETS)
+wb_RD_1_inj <- createWorkbook()
+addWorksheet(wb_RD_1_inj, "RD_1_inj Summaries"); writeData(wb_RD_1_inj, "RD_1_inj Summaries", RD_res_1_inj$summaries)
+addWorksheet(wb_RD_1_inj, "RD_1_inj ANOVA"); writeData(wb_RD_1_inj, "RD_1_inj ANOVA", RD_res_1_inj$anova)
+addWorksheet(wb_RD_1_inj, "RD_1_inj Joint"); writeData(wb_RD_1_inj, "RD_1_inj Joint", RD_res_1_inj$joint)
+addWorksheet(wb_RD_1_inj, "RD_1_inj Emmeans"); writeData(wb_RD_1_inj, "RD_1_inj Emmeans", RD_res_1_inj$emmeans)
+addWorksheet(wb_RD_1_inj, "RD_1_inj Contrasts"); writeData(wb_RD_1_inj, "RD_1_inj Contrasts", RD_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_RD_1_inj, "RD_1_inj Cell Counts"); writeData(wb_RD_1_inj, "RD_1_inj Cell Counts", RD_res_1_inj$cell_counts)
+addWorksheet(wb_RD_1_inj, "RD_1_inj Effects"); writeData(wb_RD_1_inj, "RD_1_inj Effects", RD_res_1_inj$contrasts_effects)
+saveWorkbook(wb_RD_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_RD_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# CORTICAL THICKNESS (1 FILE - 7 SHEETS)
+
+wb_fs_1_inj <- createWorkbook()
+addWorksheet(wb_fs_1_inj, "CTh_1_inj Summaries"); writeData(wb_fs_1_inj, "CTh_1_inj Summaries", CTh_res_1_inj$summaries)
+addWorksheet(wb_fs_1_inj, "CTh_1_inj ANOVA"); writeData(wb_fs_1_inj, "CTh_1_inj ANOVA", CTh_res_1_inj$anova)
+addWorksheet(wb_fs_1_inj, "CTh_1_inj Joint"); writeData(wb_fs_1_inj, "CTh_1_inj Joint", CTh_res_1_inj$joint)
+addWorksheet(wb_fs_1_inj, "CTh_1_inj Emmeans"); writeData(wb_fs_1_inj, "CTh_1_inj Emmeans", CTh_res_1_inj$emmeans)
+addWorksheet(wb_fs_1_inj, "CTh_1_inj Contrasts"); writeData(wb_fs_1_inj, "CTh_1_inj Contrasts", CTh_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_fs_1_inj, "CTh_1_inj Cell Counts"); writeData(wb_fs_1_inj, "CTh_1_inj Cell Counts", CTh_res_1_inj$cell_counts)
+addWorksheet(wb_fs_1_inj, "CTh_1_inj Effects"); writeData(wb_fs_1_inj, "CTh_1_inj Effects", CTh_res_1_inj$contrasts_effects)
+saveWorkbook(wb_fs_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_CTh_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# RESTING STATE FUNCTIONAL CONNECTIVITY (1 FILE - 7 SHEETS)
+wb_rsfc_1_inj <- createWorkbook()
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj Summaries"); writeData(wb_rsfc_1_inj, "RSFC_1_inj Summaries", RSFC_res_1_inj$summaries)
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj ANOVA"); writeData(wb_rsfc_1_inj, "RSFC_1_inj ANOVA", RSFC_res_1_inj$anova)
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj Joint"); writeData(wb_rsfc_1_inj, "RSFC_1_inj Joint", RSFC_res_1_inj$joint)
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj Emmeans"); writeData(wb_rsfc_1_inj, "RSFC_1_inj Emmeans", RSFC_res_1_inj$emmeans)
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj Contrasts"); writeData(wb_rsfc_1_inj, "RSFC_1_inj Contrasts", RSFC_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj Cell Counts"); writeData(wb_rsfc_1_inj, "RSFC_1_inj Cell Counts", RSFC_res_1_inj$cell_counts)
+addWorksheet(wb_rsfc_1_inj, "RSFC_1_inj Effects"); writeData(wb_rsfc_1_inj, "RSFC_1_inj Effects", RSFC_res_1_inj$contrasts_effects)
+saveWorkbook(wb_rsfc_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_RSFC_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# CLINICAL (1 FILE - 7 SHEETS)
+wb_clin_1_inj <- createWorkbook()
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj Summaries"); writeData(wb_clin_1_inj, "CLIN_1_inj Summaries", CLIN_res_1_inj$summaries)
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj ANOVA"); writeData(wb_clin_1_inj, "CLIN_1_inj ANOVA", CLIN_res_1_inj$anova)
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj Joint"); writeData(wb_clin_1_inj, "CLIN_1_inj Joint", CLIN_res_1_inj$joint)
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj Emmeans"); writeData(wb_clin_1_inj, "CLIN_1_inj Emmeans", CLIN_res_1_inj$emmeans)
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj Contrasts"); writeData(wb_clin_1_inj, "CLIN_1_inj Contrasts", CLIN_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj Cell Counts"); writeData(wb_clin_1_inj, "CLIN_1_inj Cell Counts", CLIN_res_1_inj$cell_counts)
+addWorksheet(wb_clin_1_inj, "CLIN_1_inj Effects"); writeData(wb_clin_1_inj, "CLIN_1_inj Effects", CLIN_res_1_inj$contrasts_effects)
+saveWorkbook(wb_clin_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_CLIN_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# BLOOD (1 FILE - 7 SHEETS)
+wb_blood_1_inj <- createWorkbook()
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj Summaries"); writeData(wb_blood_1_inj, "BLOOD_1_inj Summaries", BLOOD_res_1_inj$summaries)
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj ANOVA"); writeData(wb_blood_1_inj, "BLOOD_1_inj ANOVA", BLOOD_res_1_inj$anova)
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj Joint"); writeData(wb_blood_1_inj, "BLOOD_1_inj Joint", BLOOD_res_1_inj$joint)
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj Emmeans"); writeData(wb_blood_1_inj, "BLOOD_1_inj Emmeans", BLOOD_res_1_inj$emmeans)
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj Contrasts"); writeData(wb_blood_1_inj, "BLOOD_1_inj Contrasts", BLOOD_res_1_inj$emmeans_contrasts)
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj Cell Counts"); writeData(wb_blood_1_inj, "BLOOD_1_inj Cell Counts", BLOOD_res_1_inj$cell_counts)
+addWorksheet(wb_blood_1_inj, "BLOOD_1_inj Effects"); writeData(wb_blood_1_inj, "BLOOD_1_inj Effects", BLOOD_res_1_inj$contrasts_effects)
+saveWorkbook(wb_blood_1_inj, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/mmrm_results_BLOOD_1_inj_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# ------------------------------------------------------------------------- #
+# 15. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY 
+# ------------------------------------------------------------------------- #
+
+plot_modality(FA_data_1_inj, fa_all_outcomes, "FA_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/FA_plots_1_inj_", Sys.Date(), ".pdf"))
+plot_modality(MD_data_1_inj, md_all_outcomes, "MD_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/MD_plots_1_inj_", Sys.Date(), ".pdf"))
+plot_modality(AD_data_1_inj, ad_all_outcomes, "AD_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/AD_plots_1_inj_", Sys.Date(), ".pdf"))
+plot_modality(RD_data_1_inj, rd_all_outcomes, "RD_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/RD_plots_1_inj_", Sys.Date(), ".pdf"))
+
+plot_modality(FS_data_1_inj, FS_all_outcomes, "CTh_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/CTh_plots_1_inj_", Sys.Date(), ".pdf"))
+
+plot_modality(RSFC_data_1_inj, RSFC_all_outcomes, "RSFC_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/RSFC_plots_1_inj_", Sys.Date(), ".pdf"))
+
+plot_modality(CLIN_data_1_inj, CLIN_outcomes, "CLIN_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/CLIN_plots_1_inj_", Sys.Date(), ".pdf"))
+
+plot_modality(BLOOD_data_1_inj, BLOOD_outcomes, "BLOOD_1_inj", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_2_1_inj/BLOOD_plots_1_inj_", Sys.Date(), ".pdf"))
+
+############################################################################################
+#####################            SENSITIVITY ANALYSES 3              #######################        
+############################################################################################
+
+# ----------------------------------------------------------------------------------- #
+# 16. WHERE CMV EFFECT IS SIGNIFICANT, FILTER TO ONLY PTS THAT HAVE DATA AT 6 MONTHS
+# ----------------------------------------------------------------------------------- #
+
+run_mmrm_for_modality_6mo <- function(data, outcomes, label) {
+  
+  summaries <- data.frame()
+  anova_all <- data.frame()
+  joint_all <- data.frame()
+  emmeans_all <- data.frame()
+  emmeans_contrasts_all <- data.frame()
+  cell_counts_all <- data.frame()
+  
+  outcome_col <- paste0(label, "_Outcome")
+  
+  for (out in outcomes) {
+    
+    cat("✔ Performing 6Mo Sensitivity MMRM:", label, "-", out, "\n")
+    
+    # --------------------------------------------------
+    # FILTER: keep only subjects with non-NA at 6Mo
+    # --------------------------------------------------
+    data_6mo <- data %>%
+      group_by(INJURYID) %>%
+      filter(any(VISIT == "6Mo" & !is.na(.data[[out]]))) %>%
+      ungroup()
+    
+    # Skip if no usable data
+    if (nrow(data_6mo) == 0 || sum(!is.na(data_6mo[[out]])) == 0) {
+      warning(sprintf("No usable 6Mo data for %s (%s) — skipping.", out, label))
+      next
+    }
+    
+    f <- as.formula(paste0(out, " ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID)"))
+    
+    mod <- mmrm(
+      formula = f,
+      data = data_6mo,
+      weights = data_6mo$weights,
+      method = "Residual",
+      vcov = "Empirical-Bias-Reduced")
+    
+    # -------------------------
+    # Tidy summary
+    # -------------------------
+    tmp_summary <- broom::tidy(mod)
+    tmp_summary[[outcome_col]] <- out
+    summaries <- bind_rows(summaries, tmp_summary)
+    
+    # -------------------------
+    # ANOVA
+    # -------------------------
+    tmp_aov <- as.data.frame(Anova(mod, type = "III"))
+    tmp_aov <- cbind(Term = rownames(tmp_aov), tmp_aov)
+    rownames(tmp_aov) <- NULL
+    tmp_aov[[outcome_col]] <- out
+    anova_all <- bind_rows(anova_all, tmp_aov)
+    
+    # -------------------------
+    # Joint tests
+    # -------------------------
+    tmp_joint <- as.data.frame(joint_tests(mod, by = "VISIT"))
+    tmp_joint[[outcome_col]] <- out
+    joint_all <- bind_rows(joint_all, tmp_joint)
+    
+    # -------------------------
+    # EMMEANS
+    # -------------------------
+    em <- emmeans(mod, ~ mTBI_CMV_PI | VISIT)
+    
+    tmp_emmeans <- as.data.frame(summary(em)) %>% 
+      mutate(
+        mTBI_CMV_PI = as.character(mTBI_CMV_PI),
+        !!outcome_col := out)
+    
+    emmeans_all <- bind_rows(emmeans_all, tmp_emmeans)
+    
+    # -------------------------
+    # CONTRASTS
+    # -------------------------
+    em_contrasts <- contrast(em, method = "pairwise", adjust = "none")
+    
+    tmp_contrasts <- as.data.frame(summary(em_contrasts, infer = TRUE))
+    
+    if (!"contrast" %in% names(tmp_contrasts)) {
+      tmp_contrasts$contrast <- rownames(tmp_contrasts)
+      rownames(tmp_contrasts) <- NULL
+    }
+    
+    tmp_contrasts[[outcome_col]] <- out
+    emmeans_contrasts_all <- bind_rows(emmeans_contrasts_all, tmp_contrasts)
+    
+    # -------------------------
+    # CELL COUNTS (6Mo-restricted)
+    # -------------------------
+    tmp_counts <- data_6mo %>% 
+      group_by(VISIT, mTBI_CMV_PI) %>% 
+      summarise(
+        n_non_na = sum(!is.na(.data[[out]])),
+        .groups = "drop") %>% 
+      mutate(
+        mTBI_CMV_PI = as.character(mTBI_CMV_PI),
+        !!outcome_col := out)
+    
+    cell_counts_all <- bind_rows(cell_counts_all, tmp_counts)
+  }
+  
+  # =========================================================
+  # BUILD contrasts_effects (identical to primary function)
+  # =========================================================
+  
+  contrasts_effects <- emmeans_contrasts_all |>
+    mutate(
+      VISIT = as.character(VISIT),
+      contrast = as.character(contrast),
+      group1 = trimws(gsub("[()]", "", sub("^(.*?) - .*", "\\1", contrast))),
+      group2 = trimws(gsub("[()]", "", sub(".* - (.*)$", "\\1", contrast)))) %>% 
+    
+    left_join(
+      emmeans_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, emmean, SE) |>
+        rename(group = mTBI_CMV_PI,
+               emmean_g1 = emmean,
+               SE_g1 = SE),
+      by = c(outcome_col, "VISIT", "group1" = "group")) %>% 
+    
+    left_join(
+      emmeans_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, emmean, SE) |>
+        rename(group = mTBI_CMV_PI,
+               emmean_g2 = emmean,
+               SE_g2 = SE),
+      by = c(outcome_col, "VISIT", "group2" = "group")) %>% 
+    
+    left_join(
+      cell_counts_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, n_non_na) %>% 
+        rename(group = mTBI_CMV_PI, n1 = n_non_na),
+      by = c(outcome_col, "VISIT", "group1" = "group")) %>% 
+    
+    left_join(
+      cell_counts_all %>% 
+        select(!!sym(outcome_col), VISIT, mTBI_CMV_PI, n_non_na) %>% 
+        rename(group = mTBI_CMV_PI, n2 = n_non_na),
+      by = c(outcome_col, "VISIT", "group2" = "group")) %>% 
+    
+    rename(
+      contrast_estimate = estimate,
+      contrast_p = p.value,
+      contrast_lower = lower.CL,
+      contrast_upper = upper.CL) %>% 
+    
+    mutate(
+      SD1 = SE_g1 * sqrt(n1),
+      SD2 = SE_g2 * sqrt(n2),
+      pooled_SD = sqrt(((n1 - 1) * SD1^2 + (n2 - 1) * SD2^2) /
+                         (n1 + n2 - 2)),
+      cohen_d = contrast_estimate / pooled_SD) %>% 
+    
+    select(
+      VISIT,
+      !!sym(outcome_col),
+      group1, emmean_g1,
+      group2, emmean_g2,
+      contrast_estimate, contrast_p,
+      contrast_lower, contrast_upper,
+      n1, n2,
+      pooled_SD, cohen_d)
+  
+  list(
+    summaries = summaries,
+    anova = anova_all,
+    joint = joint_all,
+    emmeans = emmeans_all,
+    emmeans_contrasts = emmeans_contrasts_all,
+    cell_counts = cell_counts_all,
+    contrasts_effects = contrasts_effects)
+}
+
+# ----------------------------------------------------------------------------------- #
+# 17. SENSITIVITY - RERUN MMRM MODELS ON SENSITIVITY DATASETS
+# ----------------------------------------------------------------------------------- #
+
+
+FA_6mo_res <- run_mmrm_for_modality_6mo(FA_data, fa_all_outcomes, "FA6mo")
+MD_6mo_res <- run_mmrm_for_modality_6mo(MD_data, md_all_outcomes, "MD6mo")
+AD_6mo_res <- run_mmrm_for_modality_6mo(AD_data, ad_all_outcomes, "AD6mo")
+RD_6mo_res <- run_mmrm_for_modality_6mo(RD_data, rd_all_outcomes, "RD6mo")
+CTh_6mo_res <- run_mmrm_for_modality_6mo(FS_data, FS_all_outcomes, "CTh6mo")
+RSFC_6mo_res <- run_mmrm_for_modality_6mo(RSFC_data, RSFC_all_outcomes, "RSFC6mo")
+CLIN_6mo_res  <- run_mmrm_for_modality_6mo(CLIN_data, CLIN_outcomes, "CLIN6mo")
+BLOOD_6mo_res <- run_mmrm_for_modality_6mo(BLOOD_data, BLOOD_outcomes, "BLOOD6mo")
+
+# ----------------------------------------------------------------------------------- #
+# 18. SENSITIVITY - SAVE COMBINED EXCEL FILES
+# ----------------------------------------------------------------------------------- #
+
+# FA SENSITIVITY (1 FILE - 7 SHEETS)
+
+wb_FA_6mo <- createWorkbook()
+addWorksheet(wb_FA_6mo, "FA_6mo Summaries"); writeData(wb_FA_6mo, "FA_6mo Summaries", FA_6mo_res$summaries)
+addWorksheet(wb_FA_6mo, "FA_6mo ANOVA"); writeData(wb_FA_6mo, "FA_6mo ANOVA", FA_6mo_res$anova)
+addWorksheet(wb_FA_6mo, "FA_6mo Joint"); writeData(wb_FA_6mo, "FA_6mo Joint", FA_6mo_res$joint)
+addWorksheet(wb_FA_6mo, "FA_6mo Emmeans"); writeData(wb_FA_6mo, "FA_6mo Emmeans", FA_6mo_res$emmeans)
+addWorksheet(wb_FA_6mo, "FA_6mo Contrasts"); writeData(wb_FA_6mo, "FA_6mo Contrasts", FA_6mo_res$emmeans_contrasts)
+addWorksheet(wb_FA_6mo, "FA_6mo Cell Counts"); writeData(wb_FA_6mo, "FA_6mo Cell Counts", FA_6mo_res$cell_counts)
+addWorksheet(wb_FA_6mo, "FA_6mo Effects"); writeData(wb_FA_6mo, "FA_6mo Effects", FA_6mo_res$contrasts_effects)
+saveWorkbook(wb_FA_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_FA_1_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# MD (1 FILE - 7 SHEETS)
+wb_MD_6mo <- createWorkbook()
+addWorksheet(wb_MD_6mo, "MD_6mo Summaries"); writeData(wb_MD_6mo, "MD_6mo Summaries", MD_6mo_res$summaries)
+addWorksheet(wb_MD_6mo, "MD_6mo ANOVA"); writeData(wb_MD_6mo, "MD_6mo ANOVA", MD_6mo_res$anova)
+addWorksheet(wb_MD_6mo, "MD_6mo Joint"); writeData(wb_MD_6mo, "MD_6mo Joint", MD_6mo_res$joint)
+addWorksheet(wb_MD_6mo, "MD_6mo Emmeans"); writeData(wb_MD_6mo, "MD_6mo Emmeans", MD_6mo_res$emmeans)
+addWorksheet(wb_MD_6mo, "MD_6mo Contrasts"); writeData(wb_MD_6mo, "MD_6mo Contrasts", MD_6mo_res$emmeans_contrasts)
+addWorksheet(wb_MD_6mo, "MD_6mo Cell Counts"); writeData(wb_MD_6mo, "MD_6mo Cell Counts", MD_6mo_res$cell_counts)
+addWorksheet(wb_MD_6mo, "MD_6mo Effects"); writeData(wb_MD_6mo, "MD_6mo Effects", MD_6mo_res$contrasts_effects)
+saveWorkbook(wb_MD_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_MD_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# AD (1 FILE - 7 SHEETS)
+wb_AD_6mo <- createWorkbook()
+addWorksheet(wb_AD_6mo, "AD_6mo Summaries"); writeData(wb_AD_6mo, "AD_6mo Summaries", AD_6mo_res$summaries)
+addWorksheet(wb_AD_6mo, "AD_6mo ANOVA"); writeData(wb_AD_6mo, "AD_6mo ANOVA", AD_6mo_res$anova)
+addWorksheet(wb_AD_6mo, "AD_6mo Joint"); writeData(wb_AD_6mo, "AD_6mo Joint", AD_6mo_res$joint)
+addWorksheet(wb_AD_6mo, "AD_6mo Emmeans"); writeData(wb_AD_6mo, "AD_6mo Emmeans", AD_6mo_res$emmeans)
+addWorksheet(wb_AD_6mo, "AD_6mo Contrasts"); writeData(wb_AD_6mo, "AD_6mo Contrasts", AD_6mo_res$emmeans_contrasts)
+addWorksheet(wb_AD_6mo, "AD_6mo Cell Counts"); writeData(wb_AD_6mo, "AD_6mo Cell Counts", AD_6mo_res$cell_counts)
+addWorksheet(wb_AD_6mo, "AD_6mo Effects"); writeData(wb_AD_6mo, "AD_6mo Effects", AD_6mo_res$contrasts_effects)
+saveWorkbook(wb_AD_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_AD_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# RD (1 FILE - 7 SHEETS)
+wb_RD_6mo <- createWorkbook()
+addWorksheet(wb_RD_6mo, "RD_6mo Summaries"); writeData(wb_RD_6mo, "RD_6mo Summaries", RD_6mo_res$summaries)
+addWorksheet(wb_RD_6mo, "RD_6mo ANOVA"); writeData(wb_RD_6mo, "RD_6mo ANOVA", RD_6mo_res$anova)
+addWorksheet(wb_RD_6mo, "RD_6mo Joint"); writeData(wb_RD_6mo, "RD_6mo Joint", RD_6mo_res$joint)
+addWorksheet(wb_RD_6mo, "RD_6mo Emmeans"); writeData(wb_RD_6mo, "RD_6mo Emmeans", RD_6mo_res$emmeans)
+addWorksheet(wb_RD_6mo, "RD_6mo Contrasts"); writeData(wb_RD_6mo, "RD_6mo Contrasts", RD_6mo_res$emmeans_contrasts)
+addWorksheet(wb_RD_6mo, "RD_6mo Cell Counts"); writeData(wb_RD_6mo, "RD_6mo Cell Counts", RD_6mo_res$cell_counts)
+addWorksheet(wb_RD_6mo, "RD_6mo Effects"); writeData(wb_RD_6mo, "RD_6mo Effects", RD_6mo_res$contrasts_effects)
+saveWorkbook(wb_RD_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_RD_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# CORTICAL THICKNESS (1 FILE - 7 SHEETS)
+
+wb_fs_6mo <- createWorkbook()
+addWorksheet(wb_fs_6mo, "CTh_6mo Summaries"); writeData(wb_fs_6mo, "CTh_6mo Summaries", CTh_6mo_res$summaries)
+addWorksheet(wb_fs_6mo, "CTh_6mo ANOVA"); writeData(wb_fs_6mo, "CTh_6mo ANOVA", CTh_6mo_res$anova)
+addWorksheet(wb_fs_6mo, "CTh_6mo Joint"); writeData(wb_fs_6mo, "CTh_6mo Joint", CTh_6mo_res$joint)
+addWorksheet(wb_fs_6mo, "CTh_6mo Emmeans"); writeData(wb_fs_6mo, "CTh_6mo Emmeans", CTh_6mo_res$emmeans)
+addWorksheet(wb_fs_6mo, "CTh_6mo Contrasts"); writeData(wb_fs_6mo, "CTh_6mo Contrasts", CTh_6mo_res$emmeans_contrasts)
+addWorksheet(wb_fs_6mo, "CTh_6mo Cell Counts"); writeData(wb_fs_6mo, "CTh_6mo Cell Counts", CTh_6mo_res$cell_counts)
+addWorksheet(wb_fs_6mo, "CTh_6mo Effects"); writeData(wb_fs_6mo, "CTh_6mo Effects", CTh_6mo_res$contrasts_effects)
+saveWorkbook(wb_fs_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_CTh_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# RESTING STATE FUNCTIONAL CONNECTIVITY (1 FILE - 7 SHEETS)
+wb_rsfc_6mo <- createWorkbook()
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo Summaries"); writeData(wb_rsfc_6mo, "RSFC_6mo Summaries", RSFC_6mo_res$summaries)
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo ANOVA"); writeData(wb_rsfc_6mo, "RSFC_6mo ANOVA", RSFC_6mo_res$anova)
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo Joint"); writeData(wb_rsfc_6mo, "RSFC_6mo Joint", RSFC_6mo_res$joint)
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo Emmeans"); writeData(wb_rsfc_6mo, "RSFC_6mo Emmeans", RSFC_6mo_res$emmeans)
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo Contrasts"); writeData(wb_rsfc_6mo, "RSFC_6mo Contrasts", RSFC_6mo_res$emmeans_contrasts)
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo Cell Counts"); writeData(wb_rsfc_6mo, "RSFC_6mo Cell Counts", RSFC_6mo_res$cell_counts)
+addWorksheet(wb_rsfc_6mo, "RSFC_6mo Effects"); writeData(wb_rsfc_6mo, "RSFC_6mo Effects", RSFC_6mo_res$contrasts_effects)
+saveWorkbook(wb_rsfc_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_RSFC_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# CLINICAL (1 FILE - 7 SHEETS)
+wb_clin_6mo <- createWorkbook()
+addWorksheet(wb_clin_6mo, "CLIN_6mo Summaries"); writeData(wb_clin_6mo, "CLIN_6mo Summaries", CLIN_6mo_res$summaries)
+addWorksheet(wb_clin_6mo, "CLIN_6mo ANOVA"); writeData(wb_clin_6mo, "CLIN_6mo ANOVA", CLIN_6mo_res$anova)
+addWorksheet(wb_clin_6mo, "CLIN_6mo Joint"); writeData(wb_clin_6mo, "CLIN_6mo Joint", CLIN_6mo_res$joint)
+addWorksheet(wb_clin_6mo, "CLIN_6mo Emmeans"); writeData(wb_clin_6mo, "CLIN_6mo Emmeans", CLIN_6mo_res$emmeans)
+addWorksheet(wb_clin_6mo, "CLIN_6mo Contrasts"); writeData(wb_clin_6mo, "CLIN_6mo Contrasts", CLIN_6mo_res$emmeans_contrasts)
+addWorksheet(wb_clin_6mo, "CLIN_6mo Cell Counts"); writeData(wb_clin_6mo, "CLIN_6mo Cell Counts", CLIN_6mo_res$cell_counts)
+addWorksheet(wb_clin_6mo, "CLIN_6mo Effects"); writeData(wb_clin_6mo, "CLIN_6mo Effects", CLIN_6mo_res$contrasts_effects)
+saveWorkbook(wb_clin_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_CLIN_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+
+# BLOOD (1 FILE - 7 SHEETS)
+wb_blood_6mo <- createWorkbook()
+addWorksheet(wb_blood_6mo, "BLOOD_6mo Summaries"); writeData(wb_blood_6mo, "BLOOD_6mo Summaries", BLOOD_6mo_res$summaries)
+addWorksheet(wb_blood_6mo, "BLOOD_6mo ANOVA"); writeData(wb_blood_6mo, "BLOOD_6mo ANOVA", BLOOD_6mo_res$anova)
+addWorksheet(wb_blood_6mo, "BLOOD_6mo Joint"); writeData(wb_blood_6mo, "BLOOD_6mo Joint", BLOOD_6mo_res$joint)
+addWorksheet(wb_blood_6mo, "BLOOD_6mo Emmeans"); writeData(wb_blood_6mo, "BLOOD_6mo Emmeans", BLOOD_6mo_res$emmeans)
+addWorksheet(wb_blood_6mo, "BLOOD_6mo Contrasts"); writeData(wb_blood_6mo, "BLOOD_6mo Contrasts", BLOOD_6mo_res$emmeans_contrasts)
+addWorksheet(wb_blood_6mo, "BLOOD_6mo Cell Counts"); writeData(wb_blood_6mo, "BLOOD_6mo Cell Counts", BLOOD_6mo_res$cell_counts)
+addWorksheet(wb_blood_6mo, "BLOOD_6mo Effects"); writeData(wb_blood_6mo, "BLOOD_6mo Effects", BLOOD_6mo_res$contrasts_effects)
+saveWorkbook(wb_blood_6mo, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/mmrm_results_BLOOD_6mo_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# ----------------------------------------------------------------------------------- #
+# 19. SENSITIVITY - FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY
+# ----------------------------------------------------------------------------------- #
+
+# BECAUSE OF HOW THE FILTERING IS DONE, NEED TO ADJUST PLOTTING FUNCTION AND THEN RUN ON ORIGINAL DATASETS
+plot_modality_6mo <- function(data, outcomes, label, pdf_file) {
+  
+  pdf(pdf_file, width = 14, height = 14)
+  
+  for (out in outcomes) {
+    
+    cat("✔ Generating 6Mo Plots:", label, "-", out, "\n")
+    
+    # -------------------------------
+    # Filter data for participants with 6Mo data
+    # -------------------------------
+    data_6mo <- data %>%
+      group_by(INJURYID) %>%
+      filter(any(VISIT == "6Mo" & !is.na(.data[[out]]))) %>%
+      ungroup()
+    
+    # 1. Fit MMRM model
+    f <- as.formula(paste0(out, " ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID)"))
+    mod <- mmrm(
+      formula = f,
+      data = data_6mo,
+      weights = data_6mo$weights,
+      method = "Residual",
+      vcov = "Empirical-Bias-Reduced")
+    
+    # Use model frame from the model
+    model_df <- stats::model.frame(mod)
+    
+    # 2. EMM plots
+    res_emm <- emmeans(mod, pairwise ~ mTBI_CMV_PI | VISIT,
+                       adjust = "none")
+    
+    emm_df <- summary(res_emm$emmeans, infer = c(TRUE, TRUE)) %>%
+      as.data.frame() %>%
+      mutate(mTBI_CMV_PI = factor(mTBI_CMV_PI))
+    
+    pal <- setNames(
+      c("#648FFF", "#785EF0", "#DC267F", "#FE6100")[seq_along(levels(emm_df$mTBI_CMV_PI))],
+      levels(emm_df$mTBI_CMV_PI))
+    
+    p1 <- ggplot(emm_df, aes(VISIT, emmean, color = mTBI_CMV_PI, group = mTBI_CMV_PI)) +
+      geom_line(position = position_dodge(0.2)) +
+      geom_point(position = position_dodge(0.2)) +
+      geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+                    width = 0.1, position = position_dodge(0.2)) +
+      scale_color_manual(values = pal) +
+      labs(title = paste("EMM by group:", out),
+           x = "VISIT", y = "Estimated mean (EMM)", color = "mTBI_CMV_PI") +
+      theme_bw()
+    
+    # 3. Contrast plot
+    contr_df <- summary(res_emm$contrasts, infer = c(TRUE, TRUE), level = 0.95) %>%
+      as.data.frame()
+    
+    p2 <- ggplot(contr_df, aes(x = VISIT, y = estimate)) +
+      geom_hline(yintercept = 0, linetype = 2) +
+      geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL)) +
+      facet_wrap(~ contrast) +
+      labs(title = paste("Pairwise contrasts:", out),
+           y = "Difference in EMM (95% CI)") +
+      theme_bw()
+    
+    # 4. Residual diagnostics
+    res_vals <- residuals(mod)
+    fit_vals <- fitted(mod)
+    std_res <- scale(res_vals)
+    
+    p3 <- ggplot(data.frame(res_vals), aes(x = res_vals)) +
+      geom_histogram(fill = "lightblue", color = "white", bins = 30) +
+      labs(title = "Histogram of Residuals") +
+      theme_bw()
+    
+    p4 <- ggplot(data.frame(res_vals = res_vals), aes(sample = res_vals)) +
+      stat_qq() + stat_qq_line(color = "red") +
+      labs(title = "Q-Q Plot of Residuals") +
+      theme_bw()
+    
+    p5 <- ggplot(data.frame(fit_vals, res_vals), aes(x = fit_vals, y = res_vals)) +
+      geom_point() +
+      geom_hline(yintercept = 0, linetype = 2, color = "red") +
+      labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+      theme_bw()
+    
+    acf_obj <- acf(res_vals, plot = FALSE)
+    acf_df <- with(acf_obj, data.frame(lag = lag, acf = acf))
+    
+    p6 <- ggplot(acf_df, aes(x = lag, y = acf)) +
+      geom_bar(stat = "identity", fill = "lightgreen") +
+      labs(title = "ACF of Residuals") +
+      theme_bw()
+    
+    # 5. Outlier plot (|Z| > 4)
+    outlier_df <- data.frame(
+      idx = seq_along(std_res),
+      std_res = as.numeric(std_res),
+      is_outlier = abs(std_res) > 4)
+    
+    p7 <- ggplot(outlier_df, aes(x = idx, y = std_res)) +
+      geom_segment(aes(xend = idx, yend = 0)) +
+      geom_point(aes(color = is_outlier), size = 2) +
+      scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"),
+                         labels = c("FALSE" = "OK", "TRUE" = "Outlier"),
+                         name = "Flagged") +
+      geom_hline(yintercept = c(-4, 4), linetype = 2, color = "red") +
+      labs(title = "Flagged Outliers (|Z| > 4)",
+           x = "Observation",
+           y = "Standardized Residual (Z-score)") +
+      theme_bw()
+    
+    # 6. Outlier table + counts
+    outlier_idx <- which(abs(std_res) > 4)
+    outlier_ids <- model_df$INJURYID[outlier_idx]
+    outlier_visit <- model_df$VISIT[outlier_idx]
+    
+    count_df <- model_df %>%
+      dplyr::filter(!is.na(.data[[out]])) %>%
+      dplyr::count(mTBI_CMV_PI, VISIT) %>%
+      tidyr::pivot_wider(
+        names_from = VISIT,
+        values_from = n,
+        values_fill = 0)
+    
+    if (ncol(count_df) > 1) {
+      sums <- colSums(count_df[ , -1, drop = FALSE])
+      count_df <- dplyr::add_row(count_df, !!!setNames(as.list(sums), names(count_df)[-1]), mTBI_CMV_PI = "Overall")
+    } else {
+      count_df <- dplyr::add_row(count_df, mTBI_CMV_PI = "Overall")
+    }
+    
+    outlier_tbl <- if(length(outlier_idx) == 0) {
+      textGrob("No outliers detected", gp = gpar(fontsize = 10, fontface = "italic"))
+    } else {
+      tableGrob(data.frame(
+        INJURYID = outlier_ids,
+        VISIT = outlier_visit,
+        Zscore = round(std_res[outlier_idx], 4)
+      ), rows = NULL, theme = ttheme_minimal(base_size = 7))
+    }
+    
+    count_tbl <- tableGrob(count_df, rows = NULL, theme = ttheme_minimal(base_size = 7))
+    
+    outlier_block <- arrangeGrob(
+      textGrob("Flagged Residual Outliers", gp = gpar(fontsize = 12, fontface = "bold")),
+      outlier_tbl,
+      ncol = 1, heights = c(0.2, 0.8)
+    )
+    
+    count_block <- arrangeGrob(
+      textGrob("N per Group and Visit", gp = gpar(fontsize = 12, fontface = "bold")),
+      count_tbl,
+      ncol = 1, heights = c(0.2, 0.8)
+    )
+    
+    p8 <- arrangeGrob(arrangeGrob(outlier_block, count_block, ncol = 2))
+    
+    top_title <- textGrob(paste(label, "Outcome:", out),
+                          gp = gpar(fontsize = 20, fontface = "bold"))
+    
+    grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, ncol = 2, top = top_title)
+  }
+  
+  dev.off()
+  cat("✔ All", label, "6Mo plots saved to", pdf_file, "\n")
+}
+
+
+plot_modality_6mo(FA_data, fa_all_outcomes, "FA_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/FA_plots_6mo", Sys.Date(), ".pdf"))
+plot_modality_6mo(MD_data, md_all_outcomes, "MD_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/MD_plots_6mo", Sys.Date(), ".pdf"))
+plot_modality_6mo(AD_data, ad_all_outcomes, "AD_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/AD_plots_6mo", Sys.Date(), ".pdf"))
+plot_modality_6mo(RD_data, rd_all_outcomes, "RD_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/RD_plots_6mo", Sys.Date(), ".pdf"))
+
+plot_modality_6mo(FS_data, FS_all_outcomes, "CTh_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/CTh_plots_6mo", Sys.Date(), ".pdf"))
+
+plot_modality_6mo(RSFC_data, RSFC_all_outcomes, "RSFC_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/RSFC_plots_6mo", Sys.Date(), ".pdf"))
+
+plot_modality_6mo(CLIN_data, CLIN_outcomes, "CLIN_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/CLIN_plots_6mo", Sys.Date(), ".pdf"))
+
+plot_modality_6mo(BLOOD_data, BLOOD_outcomes, "BLOOD_6mo", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_3_6mo/BLOOD_plots_6mo", Sys.Date(), ".pdf"))
+
+
+############################################################################################
+########################      Sensitivity Analyses 4 - MSA        ##########################         
+############################################################################################
+
+
+# ------------------------------------------------------------------------- #
+#  20. FILTER OUT NON MSA
+# ------------------------------------------------------------------------- #
+
+##note we could replace inj with MSA ha
+
+CLIN_data_MSA <- CLIN_data %>% filter(MILACADEMY == "Yes")
+BLOOD_data_MSA <- BLOOD_data %>% filter(MILACADEMY == "Yes")
+
+
+# --------------------------- #
+# 21. RUN FOR ALL MODALITIES   #
+# --------------------------- #
+
+CLIN_res_MSA <- run_mmrm_for_modality(CLIN_data_MSA, CLIN_outcomes, "CLIN") # CLINICAL
+
+BLOOD_res_MSA <- run_mmrm_for_modality(BLOOD_data_MSA, BLOOD_outcomes, "BLOOD") # BLOOD
+
+
+# ------------------------------------------------------ #
+# 22. SAVE COMBINED EXCEL FILES (1 FILE, 7 SHEETS EACH)  #
+# ------------------------------------------------------ #
+
+# CLINICAL (1 FILE - 7 SHEETS)
+wb_clin_MSA <- createWorkbook()
+addWorksheet(wb_clin_MSA, "CLIN_MSA Summaries"); writeData(wb_clin_MSA, "CLIN_MSA Summaries", CLIN_res_MSA$summaries)
+addWorksheet(wb_clin_MSA, "CLIN_MSA ANOVA"); writeData(wb_clin_MSA, "CLIN_MSA ANOVA", CLIN_res_MSA$anova)
+addWorksheet(wb_clin_MSA, "CLIN_MSA Joint"); writeData(wb_clin_MSA, "CLIN_MSA Joint", CLIN_res_MSA$joint)
+addWorksheet(wb_clin_MSA, "CLIN_MSA Emmeans"); writeData(wb_clin_MSA, "CLIN_MSA Emmeans", CLIN_res_MSA$emmeans)
+addWorksheet(wb_clin_MSA, "CLIN_MSA Contrasts"); writeData(wb_clin_MSA, "CLIN_MSA Contrasts", CLIN_res_MSA$emmeans_contrasts)
+addWorksheet(wb_clin_MSA, "CLIN_MSA Cell Counts"); writeData(wb_clin_MSA, "CLIN_MSA Cell Counts", CLIN_res_MSA$cell_counts)
+addWorksheet(wb_clin_MSA, "CLIN_MSA Effects"); writeData(wb_clin_MSA, "CLIN_MSA Effects", CLIN_res_MSA$contrasts_effects)
+saveWorkbook(wb_clin_MSA, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_4_MSA/mmrm_results_CLIN_MSA_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+
+# BLOOD (1 FILE - 7 SHEETS)
+wb_blood_MSA <- createWorkbook()
+addWorksheet(wb_blood_MSA, "BLOOD_MSA Summaries"); writeData(wb_blood_MSA, "BLOOD_MSA Summaries", BLOOD_res_MSA$summaries)
+addWorksheet(wb_blood_MSA, "BLOOD_MSA ANOVA"); writeData(wb_blood_MSA, "BLOOD_MSA ANOVA", BLOOD_res_MSA$anova)
+addWorksheet(wb_blood_MSA, "BLOOD_MSA Joint"); writeData(wb_blood_MSA, "BLOOD_MSA Joint", BLOOD_res_MSA$joint)
+addWorksheet(wb_blood_MSA, "BLOOD_MSA Emmeans"); writeData(wb_blood_MSA, "BLOOD_MSA Emmeans", BLOOD_res_MSA$emmeans)
+addWorksheet(wb_blood_MSA, "BLOOD_MSA Contrasts"); writeData(wb_blood_MSA, "BLOOD_MSA Contrasts", BLOOD_res_MSA$emmeans_contrasts)
+addWorksheet(wb_blood_MSA, "BLOOD_MSA Cell Counts"); writeData(wb_blood_MSA, "BLOOD_MSA Cell Counts", BLOOD_res_MSA$cell_counts)
+addWorksheet(wb_blood_MSA, "BLOOD_MSA Effects"); writeData(wb_blood_MSA, "BLOOD_MSA Effects", BLOOD_res_MSA$contrasts_effects)
+saveWorkbook(wb_blood_MSA, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_4_MSA/mmrm_results_BLOOD_MSA_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# ----------------------------------------------------------- #
+# 23. FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY  #
+# ----------------------------------------------------------- #
+
+plot_modality <- function(data, outcomes, label, pdf_file) {
+  
+  pdf(pdf_file, width = 14, height = 14)
+  
+  for (out in outcomes) {
+    
+    cat("✔ Generating Plots:", label, "-", out, "\n")
+    
+    # 1. Fit MMRM model
+    f <- as.formula(paste0(out, " ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID)"))
+    mod <- mmrm(
+      formula = f,
+      data = data,
+      weights = data$weights,
+      method = "Residual",
+      vcov = "Empirical-Bias-Reduced")
+    
+    # Use model frame from the model
+    model_df <- stats::model.frame(mod)
+    
+    # 2. EMM plots
+    res_emm <- emmeans(mod, pairwise ~ mTBI_CMV_PI | VISIT,
+                       adjust = "none")
+    
+    emm_df <- summary(res_emm$emmeans, infer = c(TRUE, TRUE)) %>%
+      as.data.frame() %>%
+      mutate(mTBI_CMV_PI = factor(mTBI_CMV_PI))
+    
+    pal <- setNames(
+      c("#648FFF", "#785EF0", "#DC267F", "#FE6100")[seq_along(levels(emm_df$mTBI_CMV_PI))],
+      levels(emm_df$mTBI_CMV_PI))
+    
+    p1 <- ggplot(emm_df, aes(VISIT, emmean, color = mTBI_CMV_PI, group = mTBI_CMV_PI)) +
+      geom_line(position = position_dodge(0.2)) +
+      geom_point(position = position_dodge(0.2)) +
+      geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+                    width = 0.1, position = position_dodge(0.2)) +
+      scale_color_manual(values = pal) +
+      labs(title = paste("EMM by group:", out),
+           x = "VISIT", y = "Estimated mean (EMM)", color = "mTBI_CMV_PI") +
+      theme_bw()
+    
+    # Contrast plot
+    contr_df <- summary(res_emm$contrasts, infer = c(TRUE, TRUE), level = 0.95) %>%
+      as.data.frame()
+    
+    p2 <- ggplot(contr_df, aes(x = VISIT, y = estimate)) +
+      geom_hline(yintercept = 0, linetype = 2) +
+      geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL)) +
+      facet_wrap(~ contrast) +
+      labs(title = paste("Pairwise contrasts:", out),
+           y = "Difference in EMM (95% CI)") +
+      theme_bw()
+    
+    # 3. Residual diagnostics
+    res_vals <- residuals(mod)
+    fit_vals <- fitted(mod)
+    std_res <- scale(res_vals)
+    
+    p3 <- ggplot(data.frame(res_vals), aes(x = res_vals)) +
+      geom_histogram(fill = "lightblue", color = "white", bins = 30) +
+      labs(title = "Histogram of Residuals") +
+      theme_bw()
+    
+    p4 <- ggplot(data.frame(res_vals = res_vals), aes(sample = res_vals)) +
+      stat_qq() + stat_qq_line(color = "red") +
+      labs(title = "Q-Q Plot of Residuals") +
+      theme_bw()
+    
+    p5 <- ggplot(data.frame(fit_vals, res_vals), aes(x = fit_vals, y = res_vals)) +
+      geom_point() +
+      geom_hline(yintercept = 0, linetype = 2, color = "red") +
+      labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+      theme_bw()
+    
+    acf_obj <- acf(res_vals, plot = FALSE)
+    acf_df <- with(acf_obj, data.frame(lag = lag, acf = acf))
+    
+    p6 <- ggplot(acf_df, aes(x = lag, y = acf)) +
+      geom_bar(stat = "identity", fill = "lightgreen") +
+      labs(title = "ACF of Residuals") +
+      theme_bw()
+    
+    # --- 7. Outlier plot (|Z| > 4) ---
+    outlier_df <- data.frame(
+      idx = seq_along(std_res),
+      std_res = as.numeric(std_res),
+      is_outlier = abs(std_res) > 4)
+    
+    p7 <- ggplot(outlier_df, aes(x = idx, y = std_res)) +
+      geom_segment(aes(xend = idx, yend = 0)) +
+      geom_point(aes(color = is_outlier), size = 2) +
+      scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"),
+                         labels = c("FALSE" = "OK", "TRUE" = "Outlier"),
+                         name = "Flagged") +
+      geom_hline(yintercept = c(-4, 4), linetype = 2, color = "red") +
+      labs(title = "Flagged Outliers (|Z| > 4)",
+           x = "Observation",
+           y = "Standardized Residual (Z-score)") +
+      theme_bw()
+    
+    # --- 8. Outlier table + counts based on model data ---
+    outlier_idx <- which(abs(std_res) > 4)
+    outlier_ids <- model_df$INJURYID[outlier_idx]
+    outlier_visit <- model_df$VISIT[outlier_idx]
+    
+    # Wide count table excluding NAs
+    count_df <- model_df %>%
+      dplyr::filter(!is.na(.data[[out]])) %>%
+      dplyr::count(mTBI_CMV_PI, VISIT) %>%
+      tidyr::pivot_wider(
+        names_from = VISIT,
+        values_from = n,
+        values_fill = 0)
+    
+    # Add overall row
+    if (ncol(count_df) > 1) {
+      sums <- colSums(count_df[ , -1, drop = FALSE])
+      count_df <- dplyr::add_row(count_df, !!!setNames(as.list(sums), names(count_df)[-1]), mTBI_CMV_PI = "Overall")
+    } else {
+      count_df <- dplyr::add_row(count_df, mTBI_CMV_PI = "Overall")
+    }
+    
+    # Outlier table
+    if (length(outlier_idx) == 0) {
+      outlier_tbl <- textGrob("No outliers detected",
+                              gp = gpar(fontsize = 10, fontface = "italic"))
+    } else {
+      outlier_tbl <- tableGrob(
+        data.frame(
+          INJURYID = outlier_ids,
+          VISIT = outlier_visit,
+          Zscore = round(std_res[outlier_idx], 4)
+        ),
+        rows = NULL,
+        theme = ttheme_minimal(base_size = 7)
+      )
+    }
+    
+    # Count table
+    count_tbl <- tableGrob(
+      count_df,
+      rows = NULL,
+      theme = ttheme_minimal(base_size = 7))
+    
+    # Add subtitles
+    outlier_block <- arrangeGrob(
+      textGrob("Flagged Residual Outliers",
+               gp = gpar(fontsize = 12, fontface = "bold")),
+      outlier_tbl,
+      ncol = 1,
+      heights = c(0.2, 0.8))
+    
+    count_block <- arrangeGrob(
+      textGrob("N per Group and Visit",
+               gp = gpar(fontsize = 12, fontface = "bold")),
+      count_tbl,
+      ncol = 1,
+      heights = c(0.2, 0.8))
+    
+    # Combine into final p8
+    p8 <- arrangeGrob(
+      arrangeGrob(outlier_block, count_block, ncol = 2))
+    
+    # 4. Arrange plots with bold top title
+    top_title <- textGrob(
+      paste(label, "Outcome:", out),
+      gp = gpar(fontsize = 20, fontface = "bold"))
+    
+    grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, ncol = 2, top = top_title)
+  }
+  
+  dev.off()
+  cat("✔ All", label, "plots saved to", pdf_file, "\n")
+}
+
+# Generate separate PDFs, one per modality
+plot_modality(CLIN_data_MSA, CLIN_outcomes, "CLIN_MSA", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_4_MSA/CLIN_plots_MSA_", Sys.Date(), ".pdf"))
+plot_modality(BLOOD_data_MSA, BLOOD_outcomes, "BLOOD_MSA", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_4_MSA/BLOOD_plots_MSA_", Sys.Date(), ".pdf"))
+
+
+
+### NOTE: bsi total score (and anxiety) has issue with negative variance in this analyses, so we have to run it's own model
+## and manually pull in values. 
+mmrm(
+  formula = ln_bsi ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = CLIN_data_MSA,
+  weights = CLIN_data_MSA$weights,
+  method = "Residual",
+  vcov = "Asymptotic")
+
+emmeans(bsi2, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
+
+
+############################################################################################
+######################      Sensitivity Analyses 5 - Non-MSA        ########################         
+############################################################################################
+
+
+# ------------------------------------------------------------------------- #
+#  24. FILTER OUT NON noMSA
+# ------------------------------------------------------------------------- #
+
+##note we could replace inj with noMSA ha
+
+CLIN_data_noMSA <- CLIN_data %>% filter(MILACADEMY == "No")
+BLOOD_data_noMSA <- BLOOD_data %>% filter(MILACADEMY == "No")
+
+
+# --------------------------- #
+# 25. RUN FOR ALL MODALITIES   #
+# --------------------------- #
+
+CLIN_res_noMSA <- run_mmrm_for_modality(CLIN_data_noMSA, CLIN_outcomes, "CLIN") # CLINICAL
+
+BLOOD_res_noMSA <- run_mmrm_for_modality(BLOOD_data_noMSA, BLOOD_outcomes, "BLOOD") # BLOOD
+
+
+# ------------------------------------------------------ #
+# 26. SAVE COMBINED EXCEL FILES (1 FILE, 7 SHEETS EACH)  #
+# ------------------------------------------------------ #
+
+# CLINICAL (1 FILE - 7 SHEETS)
+wb_clin_noMSA <- createWorkbook()
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA Summaries"); writeData(wb_clin_noMSA, "CLIN_noMSA Summaries", CLIN_res_noMSA$summaries)
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA ANOVA"); writeData(wb_clin_noMSA, "CLIN_noMSA ANOVA", CLIN_res_noMSA$anova)
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA Joint"); writeData(wb_clin_noMSA, "CLIN_noMSA Joint", CLIN_res_noMSA$joint)
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA Emmeans"); writeData(wb_clin_noMSA, "CLIN_noMSA Emmeans", CLIN_res_noMSA$emmeans)
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA Contrasts"); writeData(wb_clin_noMSA, "CLIN_noMSA Contrasts", CLIN_res_noMSA$emmeans_contrasts)
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA Cell Counts"); writeData(wb_clin_noMSA, "CLIN_noMSA Cell Counts", CLIN_res_noMSA$cell_counts)
+addWorksheet(wb_clin_noMSA, "CLIN_noMSA Effects"); writeData(wb_clin_noMSA, "CLIN_noMSA Effects", CLIN_res_noMSA$contrasts_effects)
+saveWorkbook(wb_clin_noMSA, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_5_noMSA/mmrm_results_CLIN_noMSA_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+
+# BLOOD (1 FILE - 7 SHEETS)
+wb_blood_noMSA <- createWorkbook()
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA Summaries"); writeData(wb_blood_noMSA, "BLOOD_noMSA Summaries", BLOOD_res_noMSA$summaries)
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA ANOVA"); writeData(wb_blood_noMSA, "BLOOD_noMSA ANOVA", BLOOD_res_noMSA$anova)
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA Joint"); writeData(wb_blood_noMSA, "BLOOD_noMSA Joint", BLOOD_res_noMSA$joint)
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA Emmeans"); writeData(wb_blood_noMSA, "BLOOD_noMSA Emmeans", BLOOD_res_noMSA$emmeans)
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA Contrasts"); writeData(wb_blood_noMSA, "BLOOD_noMSA Contrasts", BLOOD_res_noMSA$emmeans_contrasts)
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA Cell Counts"); writeData(wb_blood_noMSA, "BLOOD_noMSA Cell Counts", BLOOD_res_noMSA$cell_counts)
+addWorksheet(wb_blood_noMSA, "BLOOD_noMSA Effects"); writeData(wb_blood_noMSA, "BLOOD_noMSA Effects", BLOOD_res_noMSA$contrasts_effects)
+saveWorkbook(wb_blood_noMSA, paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_5_noMSA/mmrm_results_BLOOD_noMSA_", Sys.Date(), ".xlsx"),  overwrite = TRUE)
+
+# ----------------------------------------------------------- #
+# 27. FIGURE PDFS – FIGURES AND DIAGNOSTIC PLOTS PER MODALITY  #
+# ----------------------------------------------------------- #
+
+plot_modality <- function(data, outcomes, label, pdf_file) {
+  
+  pdf(pdf_file, width = 14, height = 14)
+  
+  for (out in outcomes) {
+    
+    cat("✔ Generating Plots:", label, "-", out, "\n")
+    
+    # 1. Fit MMRM model
+    f <- as.formula(paste0(out, " ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID)"))
+    mod <- mmrm(
+      formula = f,
+      data = data,
+      weights = data$weights,
+      method = "Residual",
+      vcov = "Empirical-Bias-Reduced")
+    
+    # Use model frame from the model
+    model_df <- stats::model.frame(mod)
+    
+    # 2. EMM plots
+    res_emm <- emmeans(mod, pairwise ~ mTBI_CMV_PI | VISIT,
+                       adjust = "none")
+    
+    emm_df <- summary(res_emm$emmeans, infer = c(TRUE, TRUE)) %>%
+      as.data.frame() %>%
+      mutate(mTBI_CMV_PI = factor(mTBI_CMV_PI))
+    
+    pal <- setNames(
+      c("#648FFF", "#785EF0", "#DC267F", "#FE6100")[seq_along(levels(emm_df$mTBI_CMV_PI))],
+      levels(emm_df$mTBI_CMV_PI))
+    
+    p1 <- ggplot(emm_df, aes(VISIT, emmean, color = mTBI_CMV_PI, group = mTBI_CMV_PI)) +
+      geom_line(position = position_dodge(0.2)) +
+      geom_point(position = position_dodge(0.2)) +
+      geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+                    width = 0.1, position = position_dodge(0.2)) +
+      scale_color_manual(values = pal) +
+      labs(title = paste("EMM by group:", out),
+           x = "VISIT", y = "Estimated mean (EMM)", color = "mTBI_CMV_PI") +
+      theme_bw()
+    
+    # Contrast plot
+    contr_df <- summary(res_emm$contrasts, infer = c(TRUE, TRUE), level = 0.95) %>%
+      as.data.frame()
+    
+    p2 <- ggplot(contr_df, aes(x = VISIT, y = estimate)) +
+      geom_hline(yintercept = 0, linetype = 2) +
+      geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL)) +
+      facet_wrap(~ contrast) +
+      labs(title = paste("Pairwise contrasts:", out),
+           y = "Difference in EMM (95% CI)") +
+      theme_bw()
+    
+    # 3. Residual diagnostics
+    res_vals <- residuals(mod)
+    fit_vals <- fitted(mod)
+    std_res <- scale(res_vals)
+    
+    p3 <- ggplot(data.frame(res_vals), aes(x = res_vals)) +
+      geom_histogram(fill = "lightblue", color = "white", bins = 30) +
+      labs(title = "Histogram of Residuals") +
+      theme_bw()
+    
+    p4 <- ggplot(data.frame(res_vals = res_vals), aes(sample = res_vals)) +
+      stat_qq() + stat_qq_line(color = "red") +
+      labs(title = "Q-Q Plot of Residuals") +
+      theme_bw()
+    
+    p5 <- ggplot(data.frame(fit_vals, res_vals), aes(x = fit_vals, y = res_vals)) +
+      geom_point() +
+      geom_hline(yintercept = 0, linetype = 2, color = "red") +
+      labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+      theme_bw()
+    
+    acf_obj <- acf(res_vals, plot = FALSE)
+    acf_df <- with(acf_obj, data.frame(lag = lag, acf = acf))
+    
+    p6 <- ggplot(acf_df, aes(x = lag, y = acf)) +
+      geom_bar(stat = "identity", fill = "lightgreen") +
+      labs(title = "ACF of Residuals") +
+      theme_bw()
+    
+    # --- 7. Outlier plot (|Z| > 4) ---
+    outlier_df <- data.frame(
+      idx = seq_along(std_res),
+      std_res = as.numeric(std_res),
+      is_outlier = abs(std_res) > 4)
+    
+    p7 <- ggplot(outlier_df, aes(x = idx, y = std_res)) +
+      geom_segment(aes(xend = idx, yend = 0)) +
+      geom_point(aes(color = is_outlier), size = 2) +
+      scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"),
+                         labels = c("FALSE" = "OK", "TRUE" = "Outlier"),
+                         name = "Flagged") +
+      geom_hline(yintercept = c(-4, 4), linetype = 2, color = "red") +
+      labs(title = "Flagged Outliers (|Z| > 4)",
+           x = "Observation",
+           y = "Standardized Residual (Z-score)") +
+      theme_bw()
+    
+    # --- 8. Outlier table + counts based on model data ---
+    outlier_idx <- which(abs(std_res) > 4)
+    outlier_ids <- model_df$INJURYID[outlier_idx]
+    outlier_visit <- model_df$VISIT[outlier_idx]
+    
+    # Wide count table excluding NAs
+    count_df <- model_df %>%
+      dplyr::filter(!is.na(.data[[out]])) %>%
+      dplyr::count(mTBI_CMV_PI, VISIT) %>%
+      tidyr::pivot_wider(
+        names_from = VISIT,
+        values_from = n,
+        values_fill = 0)
+    
+    # Add overall row
+    if (ncol(count_df) > 1) {
+      sums <- colSums(count_df[ , -1, drop = FALSE])
+      count_df <- dplyr::add_row(count_df, !!!setNames(as.list(sums), names(count_df)[-1]), mTBI_CMV_PI = "Overall")
+    } else {
+      count_df <- dplyr::add_row(count_df, mTBI_CMV_PI = "Overall")
+    }
+    
+    # Outlier table
+    if (length(outlier_idx) == 0) {
+      outlier_tbl <- textGrob("No outliers detected",
+                              gp = gpar(fontsize = 10, fontface = "italic"))
+    } else {
+      outlier_tbl <- tableGrob(
+        data.frame(
+          INJURYID = outlier_ids,
+          VISIT = outlier_visit,
+          Zscore = round(std_res[outlier_idx], 4)
+        ),
+        rows = NULL,
+        theme = ttheme_minimal(base_size = 7)
+      )
+    }
+    
+    # Count table
+    count_tbl <- tableGrob(
+      count_df,
+      rows = NULL,
+      theme = ttheme_minimal(base_size = 7))
+    
+    # Add subtitles
+    outlier_block <- arrangeGrob(
+      textGrob("Flagged Residual Outliers",
+               gp = gpar(fontsize = 12, fontface = "bold")),
+      outlier_tbl,
+      ncol = 1,
+      heights = c(0.2, 0.8))
+    
+    count_block <- arrangeGrob(
+      textGrob("N per Group and Visit",
+               gp = gpar(fontsize = 12, fontface = "bold")),
+      count_tbl,
+      ncol = 1,
+      heights = c(0.2, 0.8))
+    
+    # Combine into final p8
+    p8 <- arrangeGrob(
+      arrangeGrob(outlier_block, count_block, ncol = 2))
+    
+    # 4. Arrange plots with bold top title
+    top_title <- textGrob(
+      paste(label, "Outcome:", out),
+      gp = gpar(fontsize = 20, fontface = "bold"))
+    
+    grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, ncol = 2, top = top_title)
+  }
+  
+  dev.off()
+  cat("✔ All", label, "plots saved to", pdf_file, "\n")
+}
+
+# Generate separate PDFs, one per modality
+plot_modality(CLIN_data_noMSA, CLIN_outcomes, "CLIN_noMSA", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_5_noMSA/CLIN_plots_noMSA_", Sys.Date(), ".pdf"))
+plot_modality(BLOOD_data_noMSA, BLOOD_outcomes, "BLOOD_noMSA", paste0("/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/PrimaryPaper010526/sensitivty_5_noMSA/BLOOD_plots_noMSA_", Sys.Date(), ".pdf"))
+
+
+
+### NOTE: bsi total score (and anxiety) has issue with negative variance in this analyses, so we have to run it's own model
+## and manually pull in values. 
+mmrm(
+  formula = ln_bsi ~ mTBI_CMV_PI * VISIT + us(VISIT | INJURYID),
+  data = CLIN_data_MSA,
+  weights = CLIN_data_MSA$weights,
+  method = "Residual",
+  vcov = "Asymptotic")
+
+emmeans(bsi2, pairwise ~ mTBI_CMV_PI | VISIT, adjust = 'none')
