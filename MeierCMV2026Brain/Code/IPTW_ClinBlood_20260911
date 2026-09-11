@@ -1,0 +1,231 @@
+##############################################################
+####################  CMV DATA ANALYSIS ######################
+#### INVERSE PROPENSITY WEIGHTING CLINICAL/BLOOD MEASURES ####
+####################  UPDATED SEP 11, 2026 ###################
+##################### CODE AUTHOR: T. MEIER ##################
+##############################################################
+
+##########################
+##### Load Libraries ##### 
+##########################
+
+library(WeightIt)
+library(cobalt)
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+########################
+##### Prepare Data ##### 
+########################
+
+#Load the dataset
+dataPrep <- read_csv("CARE_CMV_FINAL_PREPPED_121225_CLINBLOOD_121225.csv", guess_max = Inf)
+
+#restrict to baseline only
+dataPrep$VISIT <- factor(dataPrep$VISIT, levels=c("Baseline", "Postinjury", "24hours", "Asymp", "PRTP", "6Mo"), labels=c("BL", "PI", "24H", "Asymp", "PRTP", "6Mo"))
+
+data <- dataPrep %>% filter(VISIT == "BL")
+
+# Convert variables to appropriate types
+data$Race_recode <- factor(data$Race_recode)
+data$Ethnicity_recode <- factor(data$Ethnicity_recode)
+data$MILACADEMY <- factor(data$MILACADEMY)
+data$SEX <- factor(data$SEX)
+data$mTBIvsCtrl <- factor(data$mTBIvsCtrl)
+data$SPORTSRC <- factor(data$SPORTSRC)
+data$COMBATSRC <- factor(data$COMBATSRC)
+data$MILCADET <- factor(data$MILCADET)
+data$SIMOA_BATCH <- factor(data$SIMOA_BATCH)
+
+# Recode CMV_STATUS to binary treatment variable using PI status
+# CMV+ = 1 (treated), CMV- = 0 (control)
+data$CMV_BINARY <- data$CMV_PI
+
+#Restrict to only those that have CMV status at all
+data <- data %>% filter(CMV_PI >= 0)
+
+####################################################
+##### Estimate Propensity Scores with WeightIt ##### 
+####################################################
+
+ps_formula_full <- CMV_BINARY ~ Race_recode + Ethnicity_recode + MILACADEMY + BMI_replace +
+  AGE_AT_BASELINE + SEX + SES_HH_replace + TOT_CONCUSSIONS_BEFORE_INJURY
+w.out <- weightit(ps_formula_full, data = data, method = "ps", estimand = "ATE")
+data$iptw <- w.out$weights
+data$pscore <- w.out$ps
+
+#######################################################
+##### Calculate Stabilized Weights for All Models ##### 
+#######################################################
+
+p_treat <- mean(data$CMV_BINARY == 1, na.rm = TRUE)
+
+# Full model stabilized weights
+data$s_iptw <- ifelse(data$CMV_BINARY == 1,
+                      p_treat / data$pscore,
+                      (1 - p_treat) / (1 - data$pscore))
+
+########################################
+##### Covariate balance assessment ##### 
+########################################
+
+love.plot(
+  list(
+    "Full" = CMV_BINARY ~ Race_recode + Ethnicity_recode + MILACADEMY + BMI_replace +
+      AGE_AT_BASELINE + SEX + SES_HH_replace + TOT_CONCUSSIONS_BEFORE_INJURY + WTARSTANDARD_SCORE_replace
+    + SPORTSRC + mTBIvsCtrl + COMBATSRC + MILCADET),
+  line = TRUE,
+  data = data,
+  weights = list(
+    "Full" = data$s_iptw),
+  treat = "CMV_BINARY",
+  var.order = "unadjusted",
+  sample.names = c("Full"),
+  title = "Covariate Balance Comparison",
+  threshold = 0.1,
+  shapes = "circle",
+  alpha = 0.5)
+
+# Create balance summary across models
+# define balance covariates, including those not initially included in the weight calculations 
+balance_covs <- CMV_BINARY ~ Race_recode + Ethnicity_recode + MILACADEMY + BMI_replace +  AGE_AT_BASELINE + SEX + SES_HH_replace + TOT_CONCUSSIONS_BEFORE_INJURY + WTARSTANDARD_SCORE_replace + SPORTSRC + mTBIvsCtrl + COMBATSRC + MILCADET
+
+# generate the balance tables
+bal_full   <- bal.tab(balance_covs, data = data, weights = data$s_iptw, treat = data$CMV_BINARY, method = "weighting", estimand = "ATE")$Balance$Diff.Adj
+
+# create summary, looking at all variables, including those not modeled.
+balance_summary <- tibble(
+  Model = c("Full"),
+  Max_SMD = c(
+    max(abs(bal_full), na.rm = TRUE)),
+  Mean_SMD = c(
+    mean(abs(bal_full), na.rm = TRUE)),
+  Median_SMD = c(
+    median(abs(bal_full), na.rm = TRUE)))
+
+balance_summary
+
+#dump out info for individual variables. 
+bal.tab(balance_covs, data = data, method = "weighting")
+bal.tab(balance_covs, data = data, weights = data$s_iptw, method = "weighting")
+
+###########################################
+##### Merge weights back into dataset ##### 
+###########################################
+
+dataLag <- dataPrep %>%
+  left_join(data %>% select(INJURYID, iptw, s_iptw),
+            by = "INJURYID")
+
+#Restrict to only those that have CMV status at all
+dataLag1 <- dataLag %>% filter(CMV_PI >= 0)
+
+# Save a dataset for blood analyses, only including those with blood at at least 1 PI visit.
+
+###################################################################################################
+#### Save a dataset for blood analyses, only including those with blood at at least 1 PI visit ####
+###################################################################################################
+
+dataPrep0 <- dataLag1 %>% filter(VISIT == "BL" | VISIT == "PI" | VISIT == "24H" | VISIT == "Asymp" | VISIT == "PRTP" | VISIT =="6Mo")
+
+#Now create a lag to identify the individuals that have some blood at any post injury visit - ie, any blood. 
+
+#first we need to temporarily remove baselines  
+dataPrep0_noBL <- dataPrep0 %>% filter(VISIT != "BL")
+#second, identify those with some simoa data at any PI visit
+dataPrep0_noBL$SimoaData <- ifelse(!is.na(dataPrep0_noBL$SIMOA_BATCH), 1, 0)
+#third, identify those with some inflam data at any PI visit (note this catches the one pTAU too)
+dataPrep0_noBL$InflamData <- ifelse(!is.na(dataPrep0_noBL$CRP_0_tempConc), 1, 0)
+#fourth, make a combined variable to find timepoints with EITHER inflam or simoa at PI.
+dataPrep0_noBL$BloodAvail <- ifelse(dataPrep0_noBL$SimoaData == 1 | dataPrep0_noBL$InflamData == 1, 1, 0)
+#fifth, move this created variable back into the dataPrep sheet that includes baselines
+dataPrep1 <- left_join(dataPrep0, dataPrep0_noBL %>% select(INJURYID, VISIT, BloodAvail), by = c("INJURYID", "VISIT"))
+#sixth, Calculate the max of BloodAvail for each INJURYID - this seems to lag across all visits already
+dataPrep2 <- dataPrep1 %>%
+  group_by(INJURYID) %>%
+  mutate(MaxBloodAvail = max(BloodAvail, na.rm = TRUE)) %>%  # Get the max across all visits
+  ungroup()  # Ungroup to avoid issues in further operations
+
+#restrict to subjects that have BloodAvail
+dataBlood <- dataPrep2 %>% filter(MaxBloodAvail == 1)
+
+# Convert variables to appropriate types
+dataBlood$Race_recode <- factor(dataBlood$Race_recode)
+dataBlood$Ethnicity_recode <- factor(dataBlood$Ethnicity_recode)
+dataBlood$MILACADEMY <- factor(dataBlood$MILACADEMY)
+dataBlood$SEX <- factor(dataBlood$SEX)
+dataBlood$mTBIvsCtrl <- factor(dataBlood$mTBIvsCtrl)
+dataBlood$SPORTSRC <- factor(dataBlood$SPORTSRC)
+dataBlood$COMBATSRC <- factor(dataBlood$COMBATSRC)
+dataBlood$MILCADET <- factor(dataBlood$MILCADET)
+dataBlood$mTBI_CMV_Comb <- factor(dataBlood$mTBI_CMV_Comb)
+dataBlood$mTBI_CMV_PI <- factor(dataBlood$mTBI_CMV_PI)
+dataBlood$SRC_CMV_comb <- factor(dataBlood$SRC_CMV_comb)
+dataBlood$SRC_CMV_PI <- factor(dataBlood$SRC_CMV_PI)
+dataBlood$CMV_STATUS_COMBINE <- factor(dataBlood$CMV_STATUS_COMBINE)
+dataBlood$INJURYID <- as.factor(dataBlood$INJURYID)
+
+# Recode CMV_STATUS to binary treatment variable using CMV_PI
+# CMV+ = 1 (treated), CMV- = 0 (control)
+dataBlood$CMV_BINARY <- dataBlood$CMV_PI
+dataBlood$CMV_BINARY <- factor(dataBlood$CMV_BINARY, levels=c("0", "1"), labels=c("CMV-", "CMV+"))
+
+#Save R file (should keep all structure and labels)
+saveRDS(dataBlood, "/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/AcuteClinBlood/121025/data_Blood_PIRPT.rds")
+
+######################################################################################################
+#### Save a dataset for clinical analyses, only including those with blood at at least 1 PI visit ####
+######################################################################################################
+
+#Restrict to visits of interest since (confirm exits removed)
+dataPrepClin0 <- dataLag1 %>% filter(VISIT == "BL" | VISIT == "PI" |
+                                         VISIT == "24H" | VISIT == "Asymp" | VISIT == "PRTP" | VISIT =="6Mo")
+
+dataPrepClin0_noBL <- dataPrepClin0 %>% filter(VISIT != "BL")
+#second, identify those with some clinical data at any PI visit
+dataPrepClin0_noBL$ClinAvail <- ifelse(!is.na(dataPrepClin0_noBL$ln_scat) | !is.na(dataPrepClin0_noBL$ln_bsi)
+                                       | !is.na(dataPrepClin0_noBL$SAC_TOTALSCORE) | !is.na(dataPrepClin0_noBL$BESS_TOTALSCORE) 
+                                       | !is.na(dataPrepClin0_noBL$IM_SPEED) | !is.na(dataPrepClin0_noBL$IM_MEMORY), 1, 0)
+#third, move this created variable back into the dataPrep sheet that includes baselines
+dataPrepClin1 <- left_join(dataPrepClin0, dataPrepClin0_noBL %>% select(INJURYID, VISIT, ClinAvail), by = c("INJURYID", "VISIT"))
+#fourth, Calculate the max of ClinAvail for each INJURYID - this seems to lag across all visits already
+dataPrepClin2 <- dataPrepClin1 %>%
+  group_by(INJURYID) %>%
+  mutate(MaxClinAvail = max(ClinAvail, na.rm = TRUE)) %>%  # Get the max across all visits
+  ungroup() 
+
+# restrict to subjects that have ClinAvail
+dataClin <- dataPrepClin2 %>% filter(MaxClinAvail == 1)
+
+# Convert variables to appropriate types
+
+dataClin$Race_recode <- factor(dataClin$Race_recode)
+dataClin$Ethnicity_recode <- factor(dataClin$Ethnicity_recode)
+dataClin$MILACADEMY <- factor(dataClin$MILACADEMY)
+dataClin$SEX <- factor(dataClin$SEX)
+dataClin$mTBIvsCtrl <- factor(dataClin$mTBIvsCtrl)
+dataClin$SPORTSRC <- factor(dataClin$SPORTSRC)
+dataClin$COMBATSRC <- factor(dataClin$COMBATSRC)
+dataClin$MILCADET <- factor(dataClin$MILCADET)
+dataClin$mTBI_CMV_Comb <- factor(dataClin$mTBI_CMV_Comb)
+dataClin$mTBI_CMV_PI <- factor(dataClin$mTBI_CMV_PI)
+dataClin$SRC_CMV_comb <- factor(dataClin$SRC_CMV_comb)
+dataClin$SRC_CMV_PI <- factor(dataClin$SRC_CMV_PI)
+dataClin$CMV_STATUS_COMBINE <- factor(dataClin$CMV_STATUS_COMBINE)
+dataClin$INJURYID <- as.factor(dataClin$INJURYID)
+
+#transform clinical variables
+dataClin$BESS_sqrt <- sqrt(dataClin$BESS_TOTALSCORE)
+dataClin$SAC_errors_sqrt <- sqrt(dataClin$SAC_errors)
+
+# Recode CMV_STATUS to binary treatment variable using CMV_PI
+
+# CMV+ = 1 (treated), CMV- = 0 (control)
+
+dataClin$CMV_BINARY <- dataClin$CMV_PI
+dataClin$CMV_BINARY <- factor(dataClin$CMV_BINARY, levels=c("0", "1"),
+                              labels=c("CMV-", "CMV+"))
+
+#Save R file (should keep all structure and labels) 
+saveRDS(dataClin, "/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/AcuteClinBlood/121025/data_Clin_PIRPT.rds")
