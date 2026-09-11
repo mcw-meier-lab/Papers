@@ -1,0 +1,164 @@
+##############################################################
+####################  CMV DATA ANALYSIS ######################
+##### INVERSE PROPENSITY WEIGHTING MRI MEASURES ##############
+####################  UPDATED SEP 11, 2026 ###################
+##############################################################
+
+##########################
+##### Load Libraries #####
+##########################
+
+library(WeightIt)
+library(cobalt)
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+########################
+##### Prepare Data #####
+########################
+
+#Load the dataset
+dataPrep0 <- read_csv("CARE_CMV_FINAL_PREPPED_121225_MRI_121225.csv", guess_max = Inf)
+
+#We need VISIT for some data organization; prep that variable - for MRI we include 6mo.
+dataPrep0$VISIT <- factor(dataPrep0$VISIT, levels=c("Baseline", "Postinjury", "24hours", "Asymp", "PRTP", "6Mo"), labels=c("BL", "PI", "24H", "Asymp", "PRTP", "6Mo"))
+
+# Recode CMV_STATUS to binary treatment variable using CMV_PI
+# CMV+ = 1 (treated), CMV- = 0 (control)
+dataPrep0$CMV_BINARY <- dataPrep0$CMV_PI
+
+#Restrict to only those that have CMV status at all
+dataPrep0 <- dataPrep0 %>% filter(CMV_PI >= 0)
+
+#Now create a lag to identify the individuals that have some usable MRI data at any post injury visit.
+#FS, RSFC, and dMRI (using IU data - autoptx).
+
+#first we need to temporarily remove baselines
+dataPrep0_noBL <- dataPrep0 %>% filter(VISIT != "BL")
+#second, identify those with some usable FS data at any PI visit
+dataPrep0_noBL$FSData <- ifelse(dataPrep0_noBL$FS_QA == "Usable FS" | dataPrep0_noBL$FS_QA == "Questionable FS", 1, 0)
+#third, identify those with some RSFC data at any PI visit based on overall QA (no need to do head motion as well, its covered)
+dataPrep0_noBL$RSFCData <- ifelse(dataPrep0_noBL$RSFC_QA_final == 0, 1, 0)
+#fourth, identify those with some usable DTI data from autoptx and TBSS
+dataPrep0_noBL$DTIData <- ifelse(dataPrep0_noBL$AUTOPTX_exclude == "Usable", 1, 0)
+#fifth, make a combined variable to find timepoints with EITHER FS, RSFC, or DTI.
+dataPrep0_noBL$MRIAvail <- ifelse(dataPrep0_noBL$FSData == 1 | dataPrep0_noBL$RSFCData == 1 | dataPrep0_noBL$DTIData == 1, 1, 0)
+#sixth, move this created variable back into the dataPrep sheet that includes baselines
+dataPrep1 <- left_join(dataPrep0, dataPrep0_noBL %>% select(INJURYID, VISIT, MRIAvail), by = c("INJURYID", "VISIT"))
+#seventh, Calculate the max of MRIAvail for each INJURYID - this seems to lag across all visits already
+dataPrep2 <- dataPrep1 %>%
+  group_by(INJURYID) %>%
+  mutate(MaxMRIAvail = max(MRIAvail, na.rm = TRUE)) %>%  # Get the max across all visits
+  ungroup()  # Ungroup to avoid issues in further operations
+
+#rename dataPrep2
+dataPrep <- dataPrep2
+
+#restrict to baseline only AND restrict to subjects that have MRIAvail
+data <- dataPrep %>% filter(VISIT == "BL" & MaxMRIAvail == 1)
+
+# Convert variables to appropriate types
+data$Race_recode <- factor(data$Race_recode)
+data$Ethnicity_recode <- factor(data$Ethnicity_recode)
+data$MILACADEMY <- factor(data$MILACADEMY)
+data$SEX <- factor(data$SEX)
+data$mTBIvsCtrl <- factor(data$mTBIvsCtrl)
+data$SPORTSRC <- factor(data$SPORTSRC)
+data$COMBATSRC <- factor(data$COMBATSRC)
+data$MILCADET <- factor(data$MILCADET)
+data$ScanSite <- factor(data$ScanSite)
+data$ScanCoilSite <- factor(data$ScanCoilSite)
+data$RSFC_QA <- factor(data$RSFC_QA)
+data$RSFC_QA_final <- factor(data$RSFC_QA_final)
+data$FD_mean_group <- factor(data$FD_mean_group)
+data$FS_QA <- factor(data$FS_QA)
+data$AUTOPTX_exclude <- factor(data$AUTOPTX_exclude)
+data$SIMOA_BATCH <- factor(data$SIMOA_BATCH)
+
+####################################################
+##### Estimate Propensity Scores with WeightIt #####
+####################################################
+
+# Full model (no MILACADEMY since only NCAA sites have MRI)
+ps_formula_full <- CMV_BINARY ~ Race_recode + Ethnicity_recode + BMI_replace +
+  AGE_AT_BASELINE + SEX + SES_HH_replace + TOT_CONCUSSIONS_BEFORE_INJURY
+w.out <- weightit(ps_formula_full, data = data, method = "ps", estimand = "ATE")
+data$iptw <- w.out$weights
+data$pscore <- w.out$ps
+
+#######################################################
+##### Calculate Stabilized Weights for All Models #####
+#######################################################
+
+p_treat <- mean(data$CMV_BINARY == 1, na.rm = TRUE)
+
+# Full model stabilized weights
+data$s_iptw <- ifelse(data$CMV_BINARY == 1,
+                      p_treat / data$pscore,
+                      (1 - p_treat) / (1 - data$pscore))
+
+########################################
+##### Covariate balance assessment #####
+########################################
+
+love.plot(
+  list(
+    "Full" = CMV_BINARY ~ Race_recode + Ethnicity_recode + BMI_replace +
+      AGE_AT_BASELINE + SEX + SES_HH_replace + TOT_CONCUSSIONS_BEFORE_INJURY + WTARSTANDARD_SCORE_replace
+    + mTBIvsCtrl),
+  line = TRUE,
+  data = data,
+  weights = list(
+    "Full" = data$s_iptw),
+  treat = "CMV_BINARY",
+  var.order = "unadjusted",
+  sample.names = c("Full"),
+  title = "Covariate Balance Comparison",
+  threshold = 0.1,
+  shapes = "circle",
+  alpha = 0.5)
+
+# Create balance summary across models
+# define balance covariates, including those not initially included in the weight calculations
+balance_covs <- CMV_BINARY ~ Race_recode + Ethnicity_recode + BMI_replace +  AGE_AT_BASELINE + SEX + SES_HH_replace + TOT_CONCUSSIONS_BEFORE_INJURY + WTARSTANDARD_SCORE_replace + mTBIvsCtrl
+
+# generate the balance tables
+bal_full   <- bal.tab(balance_covs, data = data, weights = data$s_iptw, treat = data$CMV_BINARY, method = "weighting", estimand = "ATE")$Balance$Diff.Adj
+
+# create summary, looking at all variables, including those not modeled.
+balance_summary <- tibble(
+  Model = c("Full"),
+  Max_SMD = c(
+    max(abs(bal_full), na.rm = TRUE)),
+  Mean_SMD = c(
+    mean(abs(bal_full), na.rm = TRUE)),
+  Median_SMD = c(
+    median(abs(bal_full), na.rm = TRUE)))
+
+balance_summary
+
+#dump out info for individual variables.
+bal.tab(balance_covs, data = data, method = "weighting")
+bal.tab(balance_covs, data = data, weights = data$s_iptw, method = "weighting")
+
+###########################################
+##### Merge weights back into dataset #####
+###########################################
+
+dataLag <- dataPrep %>%
+  left_join(data %>% select(INJURYID, iptw, s_iptw),
+            by = "INJURYID")
+
+#Restrict to only those that have CMV status at all AND those that have MRIAvail
+dataLag1 <- dataLag %>% filter(CMV_PI >= 0 & MaxMRIAvail == 1)
+
+#############################################################################################
+#### Save a dataset for MRI analyses, only including those with usable MRI at a PI visit ####
+#############################################################################################
+
+#Restrict to visits of interest
+data_MRI_PIRPT <- dataLag1 %>% filter(VISIT == "BL" | VISIT == "PI" | VISIT == "24H" | VISIT == "Asymp" | VISIT == "PRTP" | VISIT == "6Mo")
+
+#Save R file (should keep all structure and labels)
+saveRDS(data_MRI_PIRPT, "/Volumes/groups/Neurosurgery Research -Clinical/Meier, Tim/Active Projects/CARE-CMV/Analyses/2ndBatchCMV/DataAnalysis/MRI/121025/data_MRI_PIRPT.rds")
