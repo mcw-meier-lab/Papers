@@ -9,3 +9,15 @@ Data processing was done using Singularity (now Apptainer) containers with the f
 
 <!--- could add an example spec.json for halfpipe; do we include basic info on the R scripts in Code? --->
 <!--- do we include the networks script for connectivity stuff? --->
+
+# Statistical analysis workflow
+The following sets of code were used to perform inverse propensity treatment weighting by CMV serostatus, ComBat-harmonization, and mixed modelling for repeated measures (MMRM).
+
+Step 1
+- IPTW_ClinBlood & IPTW_MRI (R scripts fitting IPTW models and extracting weights from baseline measures separately for clinical/blood and MRI-based measures)
+
+Step 2
+- LongCombat files (ComBat-harmonization to correct for batch effects by study site; performed for each set of outcomes of the same scale)
+
+Step 3
+- MMRM_ANALYSES (Mixed models for repeated measures and related diagnostic plots for all primary and sensitivity analyses)
