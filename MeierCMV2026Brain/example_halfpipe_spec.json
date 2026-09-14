@@ -1,0 +1,83 @@
+{
+    "halfpipe_version": "1.2.2.post1.dev189+g5579a7f",
+    "schema_version": "3.0",
+    "timestamp": "2023-06-12_07-36",
+    "global_settings": {
+        "dummy_scans": 0,
+        "slice_timing": true,
+        "use_bbr": null,
+        "skull_strip_algorithm": "ants",
+        "run_mriqc": false,
+        "run_fmriprep": true,
+        "run_halfpipe": true,
+        "fd_thres": 0.5,
+        "anat_only": false,
+        "write_graph": false,
+        "hires": false,
+        "run_reconall": false,
+        "t2s_coreg": false,
+        "medial_surface_nan": false,
+        "bold2t1w_dof": 9,
+        "fmap_bspline": true,
+        "force_syn": false,
+        "longitudinal": false,
+        "regressors_all_comps": false,
+        "regressors_dvars_th": 1.5,
+        "regressors_fd_th": 0.5,
+        "skull_strip_fixed_seed": false,
+        "skull_strip_template": "OASIS30ANTs",
+        "aroma_err_on_warn": false,
+        "aroma_melodic_dim": -200,
+        "sloppy": false
+    },
+    "files": [
+        {
+            "path": "/ext/<SITE>/halfpipe_<SCANNER>/rawdata",
+            "metadata": {},
+            "datatype": "bids"
+        },
+        {
+            "suffix": "atlas",
+            "datatype": "ref",
+            "extension": ".nii.gz",
+            "path": "/ext/code/halfpipe/tpl-MNI152NLin2009cAsymLE/tpl-MNI152NLin2009cAsym_res-02_atlas-Schaefer2018_desc-400Parcels7Networks_dseg.nii.gz",
+            "tags": {
+                "desc": "Schaefer400P7N"
+            },
+            "metadata": {
+                "space": "MNI152NLin2009cAsym"
+            }
+        }
+    ],
+    "settings": [
+        {
+            "ica_aroma": true,
+            "grand_mean_scaling": {
+                "mean": 10000.0
+            },
+            "bandpass_filter": {
+                "type": "frequency_based",
+                "low": 0.01,
+                "high": 0.1
+            },
+            "confounds_removal": [
+                "white_matter",
+                "csf"
+            ],
+            "name": "corrMatrixSetting",
+            "output_image": false
+        }
+    ],
+    "features": [
+        {
+            "atlases": [
+                "Schaefer400P7N"
+            ],
+            "setting": "corrMatrixSetting",
+            "type": "atlas_based_connectivity",
+            "min_region_coverage": 0.8,
+            "name": "corrMatrix"
+        }
+    ],
+    "models": []
+}
